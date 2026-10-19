@@ -957,7 +957,10 @@ Vec3 Camera::clampRotation(Tempest::Vec3 spin) {
   spin = spin - plSpin;
 
   spin.x = std::clamp(spin.x, minElev, maxElev);
-  spin.y = std::clamp(spin.y, minAzim, maxAzim);
+  // wrap, don't clamp: with an independent (Elden Ring) camera the actor may face the lens,
+  // and clamping at +-180 made the view snap a full turn whenever the difference crossed it
+  spin.y = std::remainder(spin.y, 360.f);
+  (void)minAzim; (void)maxAzim;
   return (spin + plSpin);
   }
 

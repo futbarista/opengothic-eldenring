@@ -979,8 +979,13 @@ void PlayerControl::implMove(uint64_t dt) {
       // Elden Ring: 8 (any) directions relative to the camera, always running face-first
       const float desired = camera->spin().y - float(std::atan2(mx,my)*180.0/3.14159265358979323846);
       float d = std::remainder(desired-rot,360.f);
+      // near a half turn the shortest side flips from frame to frame: commit to one direction
+      if(std::abs(d)>150.f && freeTurnSign!=0 && (d>0)!=(freeTurnSign>0))
+        d += freeTurnSign>0 ? 360.f : -360.f;
+      freeTurnSign = std::abs(d)>2.f ? (d>0 ? 1 : -1) : 0;
       const float step = 720.f*float(dt)/1000.f;
       rot += std::clamp(d,-step,step);
+      rot  = std::remainder(rot,360.f);
       ani  = Npc::Anim::Move;
       }
     }

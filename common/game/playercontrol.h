@@ -164,6 +164,7 @@ class PlayerControl final {
     bool           eldenCamFree   = false;
     bool           padGripRB      = false;
     float          lockSwitchAcc  = 0.f;
+    int            freeTurnSign   = 0; // keeps a ~180 degree turn going one way
     uint64_t       lockSwitchTime = 0;
 
     void           switchLockTarget(int dir);
