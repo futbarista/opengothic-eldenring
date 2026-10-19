@@ -868,8 +868,14 @@ void EldenPlayer::applyHits(Npc& pl) {
       // only the focused/locked target and npcs fighting the player: don't cleave through bystanders
       // the focused/locked target, anyone fighting this actor, and (for the player) hostile creatures
       bool relevant = (npc==lock || npc==pl.target() || npc->target()==&pl);
-      if(!relevant && pl.isPlayer() && npc->isMonster())
-        relevant = (w.script().personAttitude(*npc,pl)==ATT_HOSTILE);
+      if(!relevant && pl.isPlayer()) {
+        // Elden Ring: the player's swing hits whoever stands in its arc, except allies busy
+        // fighting someone else next to you (paladins at your side against orcs)
+        const bool allyInBattle = !npc->isMonster() && npc->target()!=nullptr && npc->target()!=&pl &&
+                                  npc->weaponState()!=WeaponState::NoWeapon &&
+                                  w.script().personAttitude(*npc,pl)!=ATT_HOSTILE;
+        relevant = !allyInBattle;
+        }
       if(!relevant)
         continue;
       if(std::find(hitDone.begin(),hitDone.end(),npc)!=hitDone.end())
@@ -879,7 +885,8 @@ void EldenPlayer::applyHits(Npc& pl) {
       pl.eldenHit(*npc,mul);
       hitDone.push_back(npc);
       if(debugOn())
-        Log::i("elden: hit ",std::string(npc->displayName())," x",mul," hp=",npc->attribute(ATR_HITPOINTS));
+        Log::i("elden: ",std::string(pl.displayName())," hit ",std::string(npc->displayName())," x",mul,
+               " hp=",npc->attribute(ATR_HITPOINTS),npc->isImmortal() ? " (immortal)" : "");
       any = true;
       }
 
