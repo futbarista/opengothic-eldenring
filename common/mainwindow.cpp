@@ -67,6 +67,8 @@ MainWindow::MainWindow(Device& device)
     SetWindowLongPtrW(h,GWL_STYLE,WS_POPUP|WS_VISIBLE);
     SetWindowPos(h,HWND_TOP,x,y,w,hh,SWP_FRAMECHANGED|SWP_SHOWWINDOW);
 #endif
+    // the mouse is captured like in fullscreen: no cursor over the game
+    setCursorShape(CursorShape::Hidden);
     }
   else if(!CommandLine::inst().isWindowMode()) {
     setFullscreen(true);
