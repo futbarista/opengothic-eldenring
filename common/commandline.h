@@ -48,6 +48,9 @@ class CommandLine {
     bool                doForceG2NR()      const { return forceG2NR;    }
     bool                aaPreset()         const { return aaPresetId;   }
     std::string_view    defaultSave()      const { return saveDef;    }
+    bool                isEldenCombat()    const { return eldenCombat;  }
+    bool                isEldenDebug()     const { return eldenDebug;   }
+    std::string_view    eldenAnims()       const { return eldenAnimsPath; }
 
     std::string         wrldDef;
 
@@ -79,5 +82,8 @@ class CommandLine {
     bool                forceG2      = false;
     bool                forceG2NR    = false;
     uint32_t            aaPresetId = 0;
+    bool                eldenCombat  = false;
+    bool                eldenDebug   = false;
+    std::string         eldenAnimsPath;
   };
 

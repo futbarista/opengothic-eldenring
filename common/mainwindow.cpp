@@ -1,5 +1,11 @@
 #include "mainwindow.h"
 
+#if defined(_WIN32)
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#endif
+
 #include <Tempest/Except>
 #include <Tempest/Painter>
 
@@ -25,6 +31,8 @@
 
 #include "commandline.h"
 #include "gothic.h"
+#include "game/eldenplayer.h"
+#include "utils/gamepad.h"
 
 using namespace Tempest;
 
@@ -214,6 +222,35 @@ void MainWindow::paintEvent(PaintEvent& event) {
       auto focus = world->validateFocus(player.focus());
       paintFocus(p,focus,vp);
 
+      // lock-on marker: a dot on the target, as in Elden Ring
+      if(auto lk = EldenPlayer::inst().lockTarget()) {
+        // on the chest: 60% of the way from the feet to the name-plate point above the head
+        auto  feet = lk->position();
+        auto  top  = lk->displayPosition();
+        auto  pos  = feet + (top-feet)*0.6f;
+        float pw   = 1.f;
+        vp.project(pos.x,pos.y,pos.z,pw);
+        if(pw>0.f) {
+          pos /= pw;
+          const float cx = (0.5f*pos.x+0.5f)*float(w());
+          const float cy = (0.5f*pos.y+0.5f)*float(h());
+          const float r  = std::max(3.f,5.f*Gothic::interfaceScale(this));
+          auto disc = [&](float rad, const Color& c) {
+            p.setBrush(c);
+            const int n = 20;
+            for(int i=0; i<n; ++i) {
+              const float a0 = 6.2831853f*float(i)/float(n), a1 = 6.2831853f*float(i+1)/float(n);
+              p.drawTriangle(cx,cy,0.f,0.f,
+                             cx+std::cos(a0)*rad,cy+std::sin(a0)*rad,0.f,0.f,
+                             cx+std::cos(a1)*rad,cy+std::sin(a1)*rad,0.f,0.f);
+              }
+            };
+          disc(r+2.f,Color(0.f,0.f,0.f,0.55f));
+          disc(r,    Color(1.f,1.f,1.f,0.95f));
+          p.setBrush(Color(1.0));
+          }
+        }
+
       if(auto pl = Gothic::inst().player()){
         if (!Gothic::inst().isDesktop()) {
           auto& opt = Gothic::options();
@@ -228,6 +265,8 @@ void MainWindow::paintEvent(PaintEvent& event) {
             drawBar(p,barHp, 10, h()-10, hp, AlignLeft | AlignBottom);
           if(showManaBar)
             drawBar(p,barMana, w()-10, h()-10, mp, AlignRight | AlignBottom);
+          if(EldenPlayer::inst().showStamina() && !showSwimBar)
+            drawBar(p,barMisc,w()/2,h()-10, EldenPlayer::inst().stamina01(), AlignHCenter | AlignBottom);
           if(showSwimBar) {
             uint32_t gl = pl->guild();
             auto     v  = float(pl->world().script().guildVal().dive_time[gl]);
@@ -306,12 +345,19 @@ void MainWindow::resizeEvent(SizeEvent&) {
 void MainWindow::mouseDownEvent(MouseEvent &event) {
   if(event.button<sizeof(mouseP))
     mouseP[event.button]=true;
+  if(!dialogs.isActive() && !inventory.isActive() && player.eldenMouse(event.button,true))
+    return;
   auto act     = keycodec.tr(event);
   auto mapping = keycodec.mapping(event);
   player.onKeyPressed(act,KeyEvent::K_NoKey,mapping);
   }
 
 void MainWindow::mouseUpEvent(MouseEvent &event) {
+  if(player.eldenMouse(event.button,false)) {
+    if(event.button<sizeof(mouseP))
+      mouseP[event.button]=false;
+    return;
+    }
   auto act     = keycodec.tr(event);
   auto mapping = keycodec.mapping(event);
   player.onKeyReleased(act,mapping);
@@ -453,6 +499,11 @@ void MainWindow::keyDownEvent(KeyEvent &event) {
     }
   uiKeyUp=nullptr;
 
+  if(player.eldenKey(event.key,true)) {
+    event.accept();
+    return;
+    }
+
   auto act     = keycodec.tr(event);
   auto mapping = keycodec.mapping(event);
   player.onKeyPressed(act,event.key,mapping);
@@ -526,9 +577,17 @@ void MainWindow::keyUpEvent(KeyEvent &event) {
     }
 
 
+  if(player.eldenKey(event.key,false))
+    return;
+
   auto act     = keycodec.tr(event);
   auto mapping = keycodec.mapping(event);
 
+  openGameMenu(act);
+  player.onKeyReleased(act, mapping);
+  }
+
+void MainWindow::openGameMenu(KeyCodec::Action act) {
   std::string_view menuEv;
   if(act==KeyCodec::Escape)
     menuEv = Gothic::inst().menuMain();
@@ -554,7 +613,115 @@ void MainWindow::keyUpEvent(KeyEvent &event) {
       }
     clearInput();
     }
-  player.onKeyReleased(act, mapping);
+  }
+
+void MainWindow::padUiKey(KeyEvent::KeyType k) {
+#if defined(__WINDOWS__) || defined(_WIN32)
+  // Post real key messages: they reach whatever has focus (menus and modal dialogs such as
+  // the save-name prompt) through the normal event loop, never re-entering a menu from tick().
+  unsigned vk = 0;
+  bool     ext = false;
+  switch(k) {
+    case KeyEvent::K_Up:     vk = VK_UP;     ext = true; break;
+    case KeyEvent::K_Down:   vk = VK_DOWN;   ext = true; break;
+    case KeyEvent::K_Left:   vk = VK_LEFT;   ext = true; break;
+    case KeyEvent::K_Right:  vk = VK_RIGHT;  ext = true; break;
+    case KeyEvent::K_Return: vk = VK_RETURN; break;
+    case KeyEvent::K_ESCAPE: vk = VK_ESCAPE; break;
+    case KeyEvent::K_Space:  vk = VK_SPACE;  break;
+    default: break;
+    }
+  if(vk!=0) {
+    HWND     h    = reinterpret_cast<HWND>(hwnd());
+    UINT     scan = MapVirtualKeyW(vk,MAPVK_VK_TO_VSC);
+    LPARAM   lp   = LPARAM(1u | (scan<<16) | (ext ? (1u<<24) : 0u));
+    PostMessageW(h,WM_KEYDOWN,WPARAM(vk),lp);
+    PostMessageW(h,WM_KEYUP,  WPARAM(vk),LPARAM(lp | (1u<<30) | (1u<<31)));
+    return;
+    }
+#endif
+  KeyEvent down(k,Event::M_NoModifier,Event::KeyDown);
+  keyDownEvent(down);
+  KeyEvent up(k,Event::M_NoModifier,Event::KeyUp);
+  keyUpEvent(up);
+  }
+
+void MainWindow::tickGamepad(uint64_t dt) {
+  auto& gp = Gamepad::inst();
+  gp.poll();
+  {
+    static bool wasConnected = false;
+    static uint32_t lastButtons = 0;
+    if(gp.isConnected()!=wasConnected) {
+      wasConnected = gp.isConnected();
+      Log::i(wasConnected ? "gamepad: XInput pad connected" : "gamepad: XInput pad disconnected");
+      }
+    if(CommandLine::inst().isEldenDebug() && gp.state().buttons!=lastButtons) {
+      lastButtons = gp.state().buttons;
+      char buf[16] = {};
+      std::snprintf(buf,sizeof(buf),"%05X",unsigned(lastButtons));
+      Log::i("gamepad: buttons=0x",buf);
+      }
+  }
+  if(!gp.isConnected()) {
+    player.tickGamepad(dt);
+    return;
+    }
+
+  auto&      st = gp.state();
+  const bool ui = video.isActive() || rootMenu.isActive() || chapter.isActive() || document.isActive() ||
+                  dialogs.isActive() || inventory.isActive();
+  if(ui) {
+    player.releaseGamepad();
+    // d-pad / left stick navigation with key repeat
+    int dir = -1;
+    if(gp.held(Gamepad::DPadUp)    || st.ly> 0.6f) dir = 0;
+    if(gp.held(Gamepad::DPadDown)  || st.ly<-0.6f) dir = 1;
+    if(gp.held(Gamepad::DPadLeft)  || st.lx<-0.6f) dir = 2;
+    if(gp.held(Gamepad::DPadRight) || st.lx> 0.6f) dir = 3;
+    const uint64_t now = Application::tickCount();
+    if(dir<0) {
+      padRepeatDir = -1;
+      }
+    else if(dir!=padRepeatDir || now>=padRepeat) {
+      padRepeat    = now + (dir!=padRepeatDir ? 350 : 120);
+      padRepeatDir = dir;
+      static const KeyEvent::KeyType keys[] = {KeyEvent::K_Up, KeyEvent::K_Down, KeyEvent::K_Left, KeyEvent::K_Right};
+      padUiKey(keys[dir]);
+      }
+    if(gp.pressed(Gamepad::A))
+      padUiKey(KeyEvent::K_Return);
+    if(gp.pressed(Gamepad::X) && inventory.isActive())
+      padUiKey(KeyEvent::K_Space);
+    // outside a game Esc/back on the title menu has nothing to return to: ignore Start there
+    const bool startBack = gp.pressed(Gamepad::Start) && Gothic::inst().isInGame();
+    if(gp.pressed(Gamepad::B) || startBack || (gp.pressed(Gamepad::Back) && inventory.isActive()))
+      padUiKey(KeyEvent::K_ESCAPE);
+    return;
+    }
+
+  if(gp.pressed(Gamepad::Start)) {
+    // exactly the Esc key path: same menu, same pause behaviour
+    padUiKey(KeyEvent::K_ESCAPE);
+    return;
+    }
+  if(gp.pressed(Gamepad::Back)) {
+    openGameMenu(KeyCodec::Inventory);
+    return;
+    }
+  player.tickGamepad(dt);
+
+  // right stick: camera / player rotation, like the mouse
+  auto camera = Gothic::inst().camera();
+  if(camera==nullptr || camera->isCutscene() || Gothic::inst().isPause())
+    return;
+  const float dtF = float(dt)/1000.f;
+  const float dx  =  st.rx*220.f*dtF;
+  const float dy  = -st.ry*140.f*dtF;
+  if(dx==0.f && dy==0.f)
+    return;
+  camera->onRotateMouse(PointF(dy,-dx));
+  player.onRotateMouse(-dx,-dy);
   }
 
 void MainWindow::focusEvent(FocusEvent &event) {
@@ -877,6 +1044,8 @@ uint64_t MainWindow::tick() {
     return 0;
   lastTick  = time;
 
+  tickGamepad(std::min<uint64_t>(dt,50));
+
   auto st = Gothic::inst().checkLoading();
   if(st==Gothic::LoadState::Finalize || st==Gothic::LoadState::FailedLoad || st==Gothic::LoadState::FailedSave) {
     Gothic::inst().finishLoading();
@@ -949,6 +1118,7 @@ void MainWindow::tickCamera(uint64_t dt) {
                              ws==WeaponState::W2H);
   auto       pos          = pl!=nullptr ? pl->cameraBone(camera.isFirstPerson()) : Vec3();
 
+  camera.setTightFollow(pl!=nullptr && EldenPlayer::inst().freeCamera(*pl));
   if(!camera.isCutscene() && !camera.isFree()) {
     const bool fs = SystemApi::isFullscreen(hwnd());
     if(!fs && mouseP[Event::ButtonLeft]) {
@@ -959,6 +1129,23 @@ void MainWindow::tickCamera(uint64_t dt) {
       dialogs.dialogCamera(camera);
       }
     else if(inventory.isActive()) {
+      camera.setTarget(pos);
+      }
+    else if(pl!=nullptr && EldenPlayer::inst().cameraFree(*pl)) {
+      // Elden Ring camera: orbits with mouse/stick, independent of the actor's facing
+      camera.setTarget(pos);
+      }
+    else if(pl!=nullptr && EldenPlayer::inst().freeCamera(*pl) && EldenPlayer::inst().lockTarget()!=nullptr) {
+      // locked on: the camera looks at the target
+      auto lk   = EldenPlayer::inst().lockTarget();
+      auto dp   = lk->position()-pl->position();
+      auto spin = camera.spin();
+      if(std::abs(dp.x)+std::abs(dp.z)>1.f) {
+        const float want = float(std::atan2(dp.z,dp.x)*180.0/3.14159265358979323846);
+        const float d    = std::remainder(want-spin.y,360.f);
+        spin.y += d*std::min(1.f,float(dt)/1000.f*10.f);
+        }
+      camera.setSpin(spin);
       camera.setTarget(pos);
       }
     else if(player.focus().npc!=nullptr && meleeFocus && pl!=nullptr) {

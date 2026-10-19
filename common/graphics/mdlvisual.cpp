@@ -818,6 +818,37 @@ uint16_t MdlVisual::comboLength() const {
   return skInst->comboLength();
   }
 
+const Animation::Sequence* MdlVisual::findAnim(std::string_view name) const {
+  return solver.solveFrm(name);
+  }
+
+bool MdlVisual::startDriven(Npc& npc, const Animation::Sequence* sq, BodyState bs) {
+  return skInst->startDriven(sq,bs,npc.world().tickCount());
+  }
+
+bool MdlVisual::setDrivenTime(Npc& npc, const Animation::Sequence* sq, uint64_t elapsed, uint16_t comboLen) {
+  return skInst->setDrivenTime(sq,elapsed,comboLen,npc.world().tickCount());
+  }
+
+void MdlVisual::stopDriven() {
+  skInst->stopDriven();
+  }
+
+void MdlVisual::setBoneOverride(const std::vector<Tempest::Matrix4x4>& local, const std::vector<uint8_t>& mask, float weight) {
+  skInst->setBoneOverride(local,mask,weight);
+  }
+
+void MdlVisual::clearBoneOverride() {
+  skInst->clearBoneOverride();
+  }
+
+bool MdlVisual::forceAnim(Npc& npc, std::string_view name, BodyState bs) {
+  auto sq = solver.solveFrm(name);
+  if(sq==nullptr)
+    return false;
+  return skInst->startAnim(solver,sq,0,bs,Pose::Force,npc.world().tickCount());
+  }
+
 Bounds MdlVisual::bounds() const {
   auto b = view.bounds();
   if(!head.view.isEmpty())

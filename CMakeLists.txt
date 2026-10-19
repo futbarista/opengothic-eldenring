@@ -77,6 +77,15 @@ file(GLOB_RECURSE SPACER_SOURCES "spacer/*.h" "spacer/*.cpp")
 
 target_sources(${PROJECT_NAME} PRIVATE ${OPENGOTHIC_SOURCES} ${ObjCSOURCES})
 
+# Elden Ring style combat: the timing table is generated locally from the user's own game copy
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/common/eldencombat/imported_timings.hpp")
+  set_source_files_properties(common/eldencombat/combat.cpp PROPERTIES
+    COMPILE_DEFINITIONS OPENMW_ELDENCOMBAT_IMPORTED_TIMINGS)
+  if(MSVC)
+    set_source_files_properties(common/eldencombat/combat.cpp PROPERTIES COMPILE_OPTIONS "/bigobj")
+  endif()
+endif()
+
 # shaders
 add_subdirectory(shader)
 target_link_libraries(${PROJECT_NAME} GothicShaders)

@@ -1,3 +1,5 @@
+> **OpenGothic – Elden Ring combat fork.** Elden Ring style combat, movement, camera and gamepad for Gothic II. See [ELDEN-COMBAT.md](ELDEN-COMBAT.md) (Polish). Combined work licensed under GPLv3 (`COPYING`); no game data is included.
+
 ## OpenGothic
 Open source re-implementation of Gothic 2: Night of the Raven.
 

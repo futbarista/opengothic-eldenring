@@ -90,6 +90,9 @@ class MainWindow : public Tempest::Window {
 
     void processMouse(Tempest::MouseEvent& event, bool enable);
     void tickMouse(uint64_t dt);
+    void tickGamepad(uint64_t dt);
+    void padUiKey(Tempest::KeyEvent::KeyType k);
+    void openGameMenu(KeyCodec::Action act);
     void onSettings();
 
     void setupUi();
@@ -157,6 +160,8 @@ class MainWindow : public Tempest::Window {
 
     Tempest::Widget*          uiKeyUp=nullptr;
     Tempest::Point            dMouse;
+    uint64_t                  padRepeat    = 0;
+    int                       padRepeatDir = -1;
     PlayerControl             player;
     uint64_t                  lastTick=0;
 

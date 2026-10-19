@@ -112,6 +112,15 @@ class MdlVisual final {
     const Animation::Sequence*     continueCombo(Npc& npc, AnimationSolver::Anim a, BodyState bs, WeaponState st, WalkBit wlk);
     uint16_t                       comboLength() const;
 
+    // Elden combat: native sequences played on an external clock
+    const Animation::Sequence*     findAnim(std::string_view name) const;
+    bool                           startDriven(Npc& npc, const Animation::Sequence* sq, BodyState bs);
+    bool                           setDrivenTime(Npc& npc, const Animation::Sequence* sq, uint64_t elapsed, uint16_t comboLen);
+    void                           stopDriven();
+    bool                           forceAnim(Npc& npc, std::string_view name, BodyState bs);
+    void                           setBoneOverride(const std::vector<Tempest::Matrix4x4>& local, const std::vector<uint8_t>& mask, float weight);
+    void                           clearBoneOverride();
+
     Bounds                         bounds() const;
 
   private:

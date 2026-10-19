@@ -91,6 +91,8 @@ class Camera final {
     float              azimuth() const;
 
     void               setSpin(const Tempest::PointF& p);
+    // Elden Ring free camera: the actor may run towards the lens, so position follows tightly
+    void               setTightFollow(bool t) { tightFollow = t; }
     void               setTarget(const Tempest::Vec3& pos);
 
     void               setAngles(const Tempest::PointF& pos);
@@ -192,4 +194,5 @@ class Camera final {
     static void           followAng   (float& ang, float dest, float speed, float dtF);
 
     const zenkit::ICamera& cameraDef() const;
+      bool               tightFollow = false;
   };

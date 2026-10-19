@@ -1,4 +1,5 @@
 #include "gamemenu.h"
+#include "game/eldenplayer.h"
 
 #include <Tempest/Painter>
 #include <Tempest/Log>
@@ -298,6 +299,24 @@ GameMenu::GameMenu(MenuRoot &owner, KeyCodec& keyCodec, zenkit::DaedalusVm& vm, 
   setPosition(int(infoX*float(w())),int(infoY*float(h())));
 
   setSelection(Gothic::inst().isInGameAndAlive() ? menu->default_ingame : menu->default_outgame);
+
+  if(menuSection=="MENU_MAIN" && EldenPlayer::isEnabled()) {
+    // "Load" first (and selected outside a game), "New game" below it: a stray confirm
+    // from the pad must never start a new game
+    int iNew = -1, iLoad = -1;
+    for(int i=0; i<int(zenkit::IMenu::item_count); ++i) {
+      if(hItems[i].name=="MENUITEM_MAIN_NEWGAME")
+        iNew = i;
+      if(hItems[i].name=="MENUITEM_MAIN_SAVEGAME_LOAD")
+        iLoad = i;
+      }
+    if(iNew>=0 && iLoad>=0 && hItems[iNew].handle && hItems[iLoad].handle) {
+      std::swap(hItems[iNew].handle->pos_y,hItems[iLoad].handle->pos_y);
+      std::swap(hItems[iNew],hItems[iLoad]); // keep pad/arrow order equal to the screen order
+      if(!Gothic::inst().isInGameAndAlive())
+        setSelection(std::min(iNew,iLoad));
+      }
+    }
   updateValues();
   slider = Resources::loadTexture("MENU_SLIDER_POS.TGA");
 

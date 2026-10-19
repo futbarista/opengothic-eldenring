@@ -5,6 +5,7 @@
 #include "constants.h"
 
 #include <array>
+#include <cmath>
 
 class DialogMenu;
 class InventoryMenu;
@@ -47,6 +48,12 @@ class PlayerControl final {
 
     bool  tickMove(uint64_t dt);
     bool  tickCameraMove(uint64_t dt);
+
+    // Elden Ring style combat and gamepad
+    bool  eldenKey  (Tempest::KeyEvent::KeyType key, bool down);
+    bool  eldenMouse(Tempest::Event::MouseButton b, bool down);
+    void  tickGamepad(uint64_t dt);
+    void  releaseGamepad();
 
   private:
     enum WeaponAction : uint8_t {
@@ -153,6 +160,25 @@ class PlayerControl final {
     int            rotationAni    = 0;
     bool           g2Ctrl         = false;
 
+    bool           shiftHeld      = false;
+    bool           eldenCamFree   = false;
+    bool           padGripRB      = false;
+    float          lockSwitchAcc  = 0.f;
+    uint64_t       lockSwitchTime = 0;
+
+    void           switchLockTarget(int dir);
+    bool           lmbElden       = false;
+    bool           lmbHeavy       = false;
+    bool           rmbElden       = false;
+    float          padFwd         = 0.f;
+    float          padStrafe      = 0.f;
+    uint32_t       padNative      = 0; // pad buttons currently forwarded as native actions
+    uint32_t       padElden       = 0; // pad buttons currently held in the elden controller
+
+    void           padNativeButton(uint32_t b, KeyCodec::Action a, bool pressed, bool released);
+    float          fwdAxis() const;
+    float          strafeAxis() const;
+
     DialogMenu&    dlg;
     InventoryMenu& inv;
 
@@ -182,18 +208,22 @@ class PlayerControl final {
     // Helper functions for movement
     //////////////////////////////////
 
+    // keyboard axes are -1/0/1; the pad's left stick adds an analog value
+    auto padStrafes() const -> bool {
+      return std::abs(strafeAxis())>0.3f && std::abs(strafeAxis())>=std::abs(fwdAxis())*0.8f;
+      }
     auto wantsToMoveForward() const -> bool {
-      return movement.forwardBackward.value() > 0.f;
+      return fwdAxis() > 0.3f;
       }
     auto wantsToMoveBackward() const -> bool {
-      return movement.forwardBackward.value() < 0.f;
+      return fwdAxis() < -0.3f;
       }
 
     auto wantsToStrafeRight() const -> bool {
-      return movement.strafeRightLeft.value() > 0.f;
+      return padStrafes() && strafeAxis() > 0.f;
       }
     auto wantsToStrafeLeft() const -> bool {
-      return movement.strafeRightLeft.value() < 0.f;
+      return padStrafes() && strafeAxis() < 0.f;
       }
 
     auto wantsToTurnRight() const -> bool {

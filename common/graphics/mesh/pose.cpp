@@ -1,4 +1,5 @@
 #include "pose.h"
+#include "game/eldenretarget.h"
 
 #include <Tempest/Log>
 
@@ -344,6 +345,8 @@ bool Pose::update(uint64_t tickCount, bool force) {
     needToUpdate = needMkSkeleton;
     }
 
+  if(ovrWeight>0.f)
+    needMkSkeleton = true;
   if(needMkSkeleton || force) {
     mkSkeleton(pos);
     return true;
@@ -443,7 +446,7 @@ void Pose::implMkSkeleton(const Matrix4x4 &mt) {
   auto  BIP01_HEAD = skeleton->BIP01_HEAD;
   for(size_t i=0; i<nodes.size(); ++i) {
     size_t parent = nodes[i].parent;
-    auto   mat    = hasSamples[i] ? mkMatrix(base[i]) : nodes[i].tr;
+    auto   mat    = localMatrix(i);
 
     if(parent<Resources::MAX_NUM_SKELETAL_NODES)
       tr[i] = tr[parent]*mat; else
@@ -464,7 +467,7 @@ void Pose::implMkSkeleton(const Tempest::Matrix4x4 &mt, size_t parent) {
   for(size_t i=0;i<nodes.size();++i){
     if(nodes[i].parent!=parent)
       continue;
-    auto mat = hasSamples[i] ? mkMatrix(base[i]) : nodes[i].tr;
+    auto mat = localMatrix(i);
     tr[i] = mt*mat;
     implMkSkeleton(tr[i],i);
     }
@@ -565,17 +568,17 @@ bool Pose::hasLayerEvents(const Pose::Layer& l) {
 
 void Pose::processSfx(Npc &npc, uint64_t tickCount) {
   for(auto& i:lay)
-    i.seq->processSfx(lastUpdate,i.sAnim,tickCount,&npc,nullptr);
+    i.seq->processSfx(eventBarrier(i,lastUpdate),i.sAnim,tickCount,&npc,nullptr);
   }
 
 void Pose::processSfx(Interactive& mob, uint64_t tickCount) {
   for(auto& i:lay)
-    i.seq->processSfx(lastUpdate,i.sAnim,tickCount,nullptr,&mob);
+    i.seq->processSfx(eventBarrier(i,lastUpdate),i.sAnim,tickCount,nullptr,&mob);
   }
 
 void Pose::processPfx(MdlVisual& visual, World& world, uint64_t tickCount) {
   for(auto& i:lay)
-    i.seq->processPfx(lastUpdate,i.sAnim,tickCount,visual,world);
+    i.seq->processPfx(eventBarrier(i,lastUpdate),i.sAnim,tickCount,visual,world);
   }
 
 bool Pose::processEvents(uint64_t &barrier, uint64_t now, Animation::EvCount &ev) const {
@@ -585,7 +588,7 @@ bool Pose::processEvents(uint64_t &barrier, uint64_t now, Animation::EvCount &ev
     }
 
   for(auto& i:lay)
-    i.seq->processEvents(barrier,i.sAnim,now,ev);
+    i.seq->processEvents(eventBarrier(i,barrier),i.sAnim,now,ev);
   barrier=now;
   return hasEvents>0;
   }
@@ -699,6 +702,22 @@ bool Pose::isInAnim(std::string_view sq) const {
   return false;
   }
 
+bool Pose::isLocomotionOnly() const {
+  for(auto& i:lay) {
+    if(i.drvFrom>=0)
+      continue; // elden-driven combat layer
+    std::string_view n = i.seq->name;
+    if(n=="S_RUN" || n=="S_WALK" || n=="S_1H" || n=="S_2H" || n=="S_FIST" || n=="S_SNEAK")
+      continue;
+    const bool loco = n.find("RUN")!=std::string_view::npos || n.find("WALK")!=std::string_view::npos ||
+                      n.find("SNEAK")!=std::string_view::npos || n.find("STRAFE")!=std::string_view::npos ||
+                      n.find("TURN")!=std::string_view::npos;
+    if(!loco || n.find("MOVE")!=std::string_view::npos)
+      return false;
+    }
+  return true;
+  }
+
 bool Pose::isInAnim(const Animation::Sequence *sq) const {
   for(auto& i:lay)
     if(i.seq==sq)
@@ -790,6 +809,98 @@ uint16_t Pose::comboLength() const {
   return combo.len();
   }
 
+Tempest::Matrix4x4 Pose::localMatrix(size_t i) const {
+  auto mat = hasSamples[i] ? mkMatrix(base[i]) : skeleton->nodes[i].tr;
+  if(ovrWeight>0.f && i<ovrMask.size() && ovrMask[i]) {
+    if(ovrWeight>=1.f)
+      return ovrLocal[i];
+    return EldenRetarget::blend(mat,ovrLocal[i],ovrWeight);
+    }
+  return mat;
+  }
+
+void Pose::setBoneOverride(const std::vector<Tempest::Matrix4x4>& local, const std::vector<uint8_t>& mask, float weight) {
+  if(skeleton==nullptr || local.size()!=skeleton->nodes.size() || mask.size()!=local.size()) {
+    clearBoneOverride();
+    return;
+    }
+  ovrLocal     = local;
+  ovrMask      = mask;
+  ovrWeight    = weight;
+  needToUpdate = true;
+  }
+
+void Pose::clearBoneOverride() {
+  if(ovrWeight>0.f)
+    needToUpdate = true;
+  ovrWeight = 0.f;
+  }
+
+bool Pose::startDriven(const Animation::Sequence* sq, BodyState bs, uint64_t tickCount) {
+  if(sq==nullptr)
+    return false;
+  for(auto& i:lay) {
+    if(i.seq->layer!=sq->layer)
+      continue;
+    if(i.seq==sq && i.drvFrom>=0) {
+      i.bs = bs;
+      return true;
+      }
+    onRemoveLayer(i);
+    i.seq     = sq;
+    i.sAnim   = tickCount;
+    i.sBlend  = 0;
+    i.comb    = 0;
+    i.bs      = bs;
+    i.drvFrom = 0;
+    i.drvAt   = 0;
+    onAddLayer(i);
+    needToUpdate = true;
+    return true;
+    }
+  addLayer(sq,bs,0,tickCount);
+  for(auto& i:lay)
+    if(i.seq==sq) {
+      i.drvFrom = 0;
+      i.drvAt   = 0;
+      }
+  needToUpdate = true;
+  return true;
+  }
+
+bool Pose::setDrivenTime(const Animation::Sequence* sq, uint64_t elapsed, uint16_t comboLen, uint64_t tickCount) {
+  for(auto& i:lay) {
+    if(i.seq!=sq || i.drvFrom<0)
+      continue;
+    elapsed   = std::min(elapsed,tickCount);
+    i.drvFrom = int64_t(std::min(i.drvAt,elapsed));
+    i.drvAt   = elapsed;
+    i.sAnim   = tickCount-elapsed;
+    combo.bits = uint16_t(comboLen & 0x7FFF);
+    needToUpdate = true;
+    return true;
+    }
+  return false;
+  }
+
+void Pose::stopDriven() {
+  bool any = false;
+  for(auto& i:lay) {
+    if(i.drvFrom>=0)
+      any = true;
+    i.drvFrom = -1;
+    }
+  if(any)
+    combo = ComboState();
+  }
+
+bool Pose::isDriven(const Animation::Sequence* sq) const {
+  for(auto& i:lay)
+    if(i.seq==sq && i.drvFrom>=0)
+      return true;
+  return false;
+  }
+
 const Tempest::Matrix4x4 Pose::rootNode() const {
   size_t id = 0;
   if(skeleton->rootNodes.size())
@@ -799,8 +910,8 @@ const Tempest::Matrix4x4 Pose::rootNode() const {
   if(id>=nodes.size())
     return Matrix4x4::mkIdentity();
 
-  auto ret = hasSamples[id] ? mkMatrix(base[id]) : nodes[id].tr;
-  return ret;
+  // includes the elden pose override: the base translation must cancel the root that is actually shown
+  return localMatrix(id);
   }
 
 const Matrix4x4 Pose::rootBone() const {

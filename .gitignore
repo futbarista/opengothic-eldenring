@@ -28,3 +28,8 @@ internal/
 
 #os
 .DS_Store
+
+# Elden Ring combat: data generated locally from your own game copy, never committed
+common/eldencombat/imported_timings.hpp
+player_anims.bin
+build.log

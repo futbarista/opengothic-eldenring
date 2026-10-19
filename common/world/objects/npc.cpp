@@ -6,6 +6,8 @@
 #include "graphics/mesh/skeleton.h"
 #include "graphics/visualfx.h"
 #include "game/damagecalculator.h"
+#include "game/eldenplayer.h"
+#include "game/eldenretarget.h"
 #include "game/serialize.h"
 #include "game/gamescript.h"
 #include "utils/string_frm.h"
@@ -883,7 +885,12 @@ void Npc::dropTorch(bool burnout) {
   }
 
 Tempest::Vec3 Npc::animMoveSpeed(uint64_t dt) const {
-  return visual.pose().animMoveSpeed(owner.tickCount(),dt);
+  auto ret = visual.pose().animMoveSpeed(owner.tickCount(),dt);
+  if(elden!=nullptr) {
+    ret *= elden->rootMotionScale(*this);
+    ret  = elden->smoothRootMotion(ret,dt,owner.tickCount());
+    }
+  return ret;
   }
 
 void Npc::setVisual(const Skeleton* v) {
@@ -1003,6 +1010,9 @@ const Animation::Sequence* Npc::setAnimAngGet(Anim a) {
   }
 
 const Animation::Sequence* Npc::setAnimAngGet(Anim a, uint8_t comb) {
+  if(elden!=nullptr && !isPlayer() && elden->blocksLocomotion(*this) &&
+     (a==Anim::Idle || a==Anim::Move || a==Anim::MoveBack || a==Anim::MoveL || a==Anim::MoveR))
+    return nullptr; // an elden action owns this npc's animation
   auto st  = weaponState();
   auto wlk = walkMode();
   return visual.startAnimAndGet(*this,a,comb,st,wlk);
@@ -1612,8 +1622,17 @@ bool Npc::implAttack(uint64_t dt) {
     return true;
     }
 
+  EldenPlayer* erActor = (!isPlayer() && elden!=nullptr && elden->ownsMelee(*this) &&
+                          (ws==WeaponState::Fist || ws==WeaponState::W1H || ws==WeaponState::W2H)) ? elden.get() : nullptr;
+
   if(act==FightAlgo::MV_BLOCK) {
     if(!fghAlgo.isInFocusAngle(*this, *currentTarget)) {
+      fghAlgo.consumeAction();
+      return true;
+      }
+    if(erActor!=nullptr) {
+      erActor->aiGuard(0.7f);
+      implFaiWait(700);
       fghAlgo.consumeAction();
       return true;
       }
@@ -1705,6 +1724,16 @@ bool Npc::implAttack(uint64_t dt) {
         fghAlgo.consumeAction();
         return true;
         }
+      if(erActor!=nullptr) {
+        // Elden controller: light/heavy chains with imported timings
+        if(erActor->aiAttack(*this)) {
+          implFaiWait(erActor->aiWaitMs());
+          fghAlgo.consumeAction();
+          } else {
+          implTurnToFai(*currentTarget,dt);
+          }
+        return true;
+        }
       const auto atkType = (ws==WeaponState::Fist) ? Anim::Attack : ani[act-FightAlgo::MV_ATTACK];
       const bool atk     = doAttack(atkType, BS_HIT);
 
@@ -1780,6 +1809,12 @@ bool Npc::implAttack(uint64_t dt) {
       //NOTE: jump-back is ultimate defence, so better to use it only if npc face player directly
       fghAlgo.consumeAction();
       aiState.loopNextTime = owner.tickCount(); // force ZS_MM_Attack_Loop call
+      return true;
+      }
+    if(erActor!=nullptr) {
+      erActor->aiDodge(0.f,0.f); // Elden backstep with i-frames
+      implFaiWait(700);
+      fghAlgo.consumeAction();
       return true;
       }
     if(setAnim(Npc::Anim::MoveBack)) {
@@ -2007,6 +2042,8 @@ bool Npc::setGoToLadder() {
 void Npc::commitDamage() {
   if(currentTarget==nullptr)
     return;
+  if(elden!=nullptr && elden->ownsMelee(*this))
+    return; // hit windows come from the elden controller
   if(!fghAlgo.isInAttackRange(*this,*currentTarget,owner.script()))
     return;
   if(!fghAlgo.isInFocusAngle(*this,*currentTarget))
@@ -2019,9 +2056,12 @@ void Npc::takeDamage(Npc &other, const Bullet* b) {
     return;
 
   assert(b==nullptr || !b->isSpell());
+  const bool  elden   = this->elden!=nullptr && this->elden->ownsMelee(*this);
+  if(elden && !this->elden->onPlayerHit(*this,other,b))
+    return; // dodged, blocked or protected
   const auto& pose    = visual.pose();
-  const bool  isJumpb = pose.isJumpBack(owner.tickCount()) && fghAlgo.isInJumpBackAngle(*this,other);
-  const bool  isBlock = (!other.isMonster() || other.inventory().activeWeapon()!=nullptr) &&
+  const bool  isJumpb = !elden && pose.isJumpBack(owner.tickCount()) && fghAlgo.isInJumpBackAngle(*this,other);
+  const bool  isBlock = !elden && (!other.isMonster() || other.inventory().activeWeapon()!=nullptr) &&
                          fghAlgo.isInFocusAngle(*this,other) &&
                          pose.isDefence(owner.tickCount());
 
@@ -2040,6 +2080,8 @@ void Npc::takeDamage(Npc &other, const Bullet* b) {
 
 void Npc::takeDamage(Npc& other, const Bullet* b, const VisualFx* vfx, int32_t splId) {
   if(isDown())
+    return;
+  if(elden!=nullptr && elden->dodgesSpell(*this))
     return;
 
   lastHitSpell = splId;
@@ -2082,6 +2124,8 @@ void Npc::takeDamage(Npc& other, const Bullet* b, const CollideMask bMask, int32
     }
 
   hitResult = DamageCalculator::damageValue(other,*this,b,isSpell,dmg,bMask);
+  if(!isSpell && b==nullptr && other.eldenDamageMul!=1.f && hitResult.hasHit && !hitResult.invincible)
+    hitResult.value = std::max<int32_t>(1,int32_t(std::lround(float(hitResult.value)*other.eldenDamageMul)));
   if(!isSpell && !isDown() && hitResult.hasHit)
     owner.addWeaponHitEffect(other,b,*this).play();
 
@@ -2090,7 +2134,8 @@ void Npc::takeDamage(Npc& other, const Bullet* b, const CollideMask bMask, int32
     return;
     }
 
-  if(hitResult.hasHit) {
+  const bool poiseHeld = (elden!=nullptr && elden->consumePoiseAbsorb());
+  if(hitResult.hasHit && !poiseHeld) {
     auto state = bodyStateMasked();
     if(interactive()==nullptr && ((state&BS_FLAG_INTERRUPTABLE)!=BS_NONE || state==BS_RUN || state==BS_NONE)) {
       //NONE/RUN requires for monsters like waran
@@ -2342,6 +2387,8 @@ void Npc::tick(uint64_t dt) {
 
   assert(go2.flag!=GoToHint::GT_Enemy && go2.flag!=GoToHint::GT_EnemyG);
 
+  if(auto e = eldenActor())
+    e->tick(*this,dt);
   tickAnimationTags();
 
   if(!visual.pose().hasAnim())
@@ -4152,6 +4199,94 @@ bool Npc::isTalk() const {
 
 bool Npc::isAttackAnim() const {
   return visual.pose().isAttackAnim();
+  }
+
+const Animation::Sequence* Npc::eldenFindAnim(std::string_view name) const {
+  return visual.findAnim(name);
+  }
+
+bool Npc::eldenStartDriven(const Animation::Sequence* sq, BodyState bs) {
+  visual.setAnimRotate(*this,0);
+  return visual.startDriven(*this,sq,bs);
+  }
+
+bool Npc::eldenSetDrivenTime(const Animation::Sequence* sq, uint64_t elapsed, uint16_t comboLen) {
+  return visual.setDrivenTime(*this,sq,elapsed,comboLen);
+  }
+
+void Npc::eldenStopDriven() {
+  visual.stopDriven();
+  }
+
+bool Npc::eldenForceAnim(std::string_view name, BodyState bs) {
+  return visual.forceAnim(*this,name,bs);
+  }
+
+bool Npc::eldenCanHit(const Npc& other) const {
+  if(!fghAlgo.isInAttackRange(*this,other,owner.script()))
+    return false;
+  // Elden Ring swings sweep a wide arc: anything within ~70 degrees of the facing can be hit
+  auto dp = other.position()-position();
+  dp.y = 0;
+  const float len = dp.length();
+  if(len<1.f)
+    return true;
+  const float a = rotationRad();
+  return (dp.x*std::cos(a)+dp.z*std::sin(a))/len >= 0.34f;
+  }
+
+void Npc::eldenHit(Npc& other, float damageMul) {
+  eldenDamageMul = damageMul;
+  other.takeDamage(*this,nullptr);
+  eldenDamageMul = 1.f;
+  }
+
+void Npc::eldenSetBoneOverride(const std::vector<Tempest::Matrix4x4>& local, const std::vector<uint8_t>& mask, float weight) {
+  visual.setBoneOverride(local,mask,weight);
+  }
+
+EldenPlayer* Npc::eldenActor() {
+  if(elden!=nullptr)
+    return elden.get();
+  if(!EldenPlayer::isEnabled())
+    return nullptr;
+  if(!isPlayer()) {
+    // humanoids (humans, orcs, goblins, skeletons, zombies, lizardmen...); beasts and giants stay native
+    auto sk = visual.visualSkeleton();
+    if(sk==nullptr)
+      return nullptr;
+    if(!EldenRetarget::isHumanoid(*sk)) {
+      // beasts: Gothic animations, Elden logic (timing from their own swing, poise, dodges)
+      if(visual.findAnim("S_FISTATTACK")==nullptr)
+        return nullptr;
+      elden = std::make_unique<EldenPlayer>(true);
+      return elden.get();
+      }
+    }
+  elden = std::make_unique<EldenPlayer>();
+  return elden.get();
+  }
+
+bool Npc::eldenIsSwitchingWeapon() const {
+  static const char* names[] = {
+    "T_MOVE_2_1HMOVE","T_1HMOVE_2_MOVE","T_MOVE_2_2HMOVE","T_2HMOVE_2_MOVE",
+    "T_MOVE_2_FISTMOVE","T_FISTMOVE_2_MOVE","T_MOVE_2_BOWMOVE","T_BOWMOVE_2_MOVE",
+    "T_MOVE_2_CBOWMOVE","T_CBOWMOVE_2_MOVE","T_MOVE_2_MAGMOVE","T_MAGMOVE_2_MOVE",
+    };
+  auto& pose = visual.pose();
+  for(auto n:names)
+    if(pose.isInAnim(n))
+      return true;
+  return false;
+  }
+
+void Npc::eldenClearBoneOverride() {
+  visual.clearBoneOverride();
+  }
+
+void Npc::eldenBlockEffect(Npc& attacker) {
+  if(invent.activeWeapon()!=nullptr)
+    visual.emitBlockEffect(*this,attacker);
   }
 
 bool Npc::isPrehit() const {

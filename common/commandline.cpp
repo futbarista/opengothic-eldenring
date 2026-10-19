@@ -89,6 +89,17 @@ CommandLine::CommandLine(int argc, const char** argv) {
     else if(arg=="-nomenu") {
       noMenu = true;
       }
+    else if(arg=="-eldencombat") {
+      eldenCombat = true;
+      }
+    else if(arg=="-eldendebug") {
+      eldenDebug = true;
+      }
+    else if(arg=="-eldenanims") {
+      ++i;
+      if(i<argc)
+        eldenAnimsPath = argv[i];
+      }
     else if(arg=="-benchmark") {
       isBenchmark = Benchmark::Normal;
       if(i+1<argc && argv[i+1][0]!='-') {

@@ -15,12 +15,15 @@
 #include "world/waypath.h"
 
 #include <cstdint>
+#include <memory>
 #include <string>
 
 #include <zenkit/addon/daedalus.hh>
 
 class Interactive;
 class WayPoint;
+
+class EldenPlayer;
 
 class Npc final {
   public:
@@ -289,6 +292,24 @@ class Npc final {
 
     bool      isAttackAnim() const;
     bool      isPrehit() const;
+
+    // Elden combat adapter hooks (player only)
+    auto      eldenFindAnim(std::string_view name) const -> const Animation::Sequence*;
+    bool      eldenStartDriven(const Animation::Sequence* sq, BodyState bs);
+    bool      eldenSetDrivenTime(const Animation::Sequence* sq, uint64_t elapsed, uint16_t comboLen);
+    void      eldenStopDriven();
+    bool      eldenForceAnim(std::string_view name, BodyState bs);
+    bool      eldenCanHit(const Npc& other) const;
+    void      eldenHit(Npc& other, float damageMul);
+    void      eldenBlockEffect(Npc& attacker);
+    auto      eldenSkeleton() const -> const Skeleton* { return visual.visualSkeleton(); }
+    void      eldenSetBoneOverride(const std::vector<Tempest::Matrix4x4>& local, const std::vector<uint8_t>& mask, float weight);
+    void      eldenClearBoneOverride();
+    bool      eldenIsSwitchingWeapon() const;
+    bool      eldenNativeLocomotion() const { return visual.pose().isLocomotionOnly(); }
+    // Elden Ring combat actor: the player and human NPCs (created on demand)
+    EldenPlayer* eldenActor();
+    const EldenPlayer* eldenActorIfAny() const { return elden.get(); }
     bool      isImmortal() const;
 
     void      setPerceptionTime   (uint64_t time);
@@ -581,6 +602,8 @@ class Npc final {
     // last hit
     Npc*                           lastHit          = nullptr;
     char                           lastHitType      = 'A';
+    float                          eldenDamageMul   = 1.f;
+    std::unique_ptr<EldenPlayer>   elden;
     int32_t                        lastHitSpell     = 0;
 
     // spell cast

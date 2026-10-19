@@ -67,6 +67,8 @@ class Pose final {
     bool               isAttackAnim() const;
     bool               isIdle() const;
     bool               isInAnim(std::string_view           sq) const;
+    // every native layer is plain stance/locomotion (no gestures, ambient or item animations)
+    bool               isLocomotionOnly() const;
     bool               isInAnim(const Animation::Sequence* sq) const;
     bool               hasAnim() const;
     uint64_t           animationTotalTime() const;
@@ -74,6 +76,15 @@ class Pose final {
 
     auto               continueCombo(const AnimationSolver &solver, const Animation::Sequence *sq, BodyState bs, uint64_t tickCount) -> const Animation::Sequence*;
     uint16_t           comboLength() const;
+
+    // Elden combat: play a sequence without transitions and let the caller own its clock
+    bool               startDriven(const Animation::Sequence* sq, BodyState bs, uint64_t tickCount);
+    bool               setDrivenTime(const Animation::Sequence* sq, uint64_t elapsed, uint16_t comboLen, uint64_t tickCount);
+    void               stopDriven();
+    bool               isDriven(const Animation::Sequence* sq) const;
+    // Elden combat: replace local matrices of masked bones (retargeted Elden Ring pose)
+    void               setBoneOverride(const std::vector<Tempest::Matrix4x4>& local, const std::vector<uint8_t>& mask, float weight);
+    void               clearBoneOverride();
 
     float              translateY() const { return trY; }
     auto               rootNode() const -> const Tempest::Matrix4x4;
@@ -103,7 +114,14 @@ class Pose final {
       uint64_t                   sBlend   = 0;
       uint8_t                    comb     = 0;
       BodyState                  bs       = BS_NONE;
+      // externally driven clock (elden combat): event barrier and last time, in animation time
+      int64_t                    drvFrom  = -1;
+      uint64_t                   drvAt    = 0;
       };
+
+    static uint64_t eventBarrier(const Layer& l, uint64_t barrier) {
+      return l.drvFrom>=0 ? l.sAnim+uint64_t(l.drvFrom) : barrier;
+      }
 
     struct ComboState {
       uint16_t bits = 0;
@@ -133,6 +151,11 @@ class Pose final {
 
     const Skeleton*                 skeleton=nullptr;
     std::vector<Layer>              lay;
+    std::vector<Tempest::Matrix4x4> ovrLocal;
+    std::vector<uint8_t>            ovrMask;
+    float                           ovrWeight = 0.f;
+
+    Tempest::Matrix4x4              localMatrix(size_t i) const;
     const Animation::Sequence*      rotation=nullptr;
     int32_t                         itemUseSt     = 0;
     int32_t                         itemUseDestSt = 0;

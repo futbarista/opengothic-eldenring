@@ -821,7 +821,11 @@ void Camera::tickThirdPerson(float dtF) {
       }
     // and has leash-like follow for target+offset
     // ignores def.translate
-    inter.target = followTarget(inter.target, state.target+targetOffset, dtF);
+    // tight follow: the actor can run straight at the camera without overtaking it
+    if(tightFollow)
+      inter.target = state.target+targetOffset; // Elden camera: no leash lag, the actor can't overtake it
+    else
+      inter.target = followTarget(inter.target, state.target+targetOffset, dtF);
     }
 
   auto dir = Vec3{0,0,1};
@@ -832,7 +836,12 @@ void Camera::tickThirdPerson(float dtF) {
     // testd in marvin: collision is calculated from offseted 'target', not from npc
     range = calcCameraColision(inter.target, dir, rotation, range);
     // NOTE: with range < 80, camera gradually moves up in vanilla
-    if(range<80.f) {
+    if(range<80.f && tightFollow) {
+      // Elden camera: running towards the lens pushes it into walls all the time;
+      // just move closer instead of snapping to the vanilla top-down view
+      range = std::max(range,35.f);
+      }
+    else if(range<80.f) {
       range      = 150; // also collision?!
       rotation.x = 80;
       rotation.y = state.spin.y;
@@ -842,7 +851,10 @@ void Camera::tickThirdPerson(float dtF) {
       }
     }
 
-  if(def.translate!=0) {
+  if(tightFollow && camMod!=Dialog) {
+    origin = inter.target + dir*range; // Elden camera: view direction comes only from the spin, never flips
+    }
+  else if(def.translate!=0) {
     origin = followTrans(origin, inter.target + dir*range, (camMod!=Dialog ? dtF : -1.f), def.velo_trans);
     }
 
