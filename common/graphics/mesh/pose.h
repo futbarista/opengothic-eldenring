@@ -85,6 +85,10 @@ class Pose final {
     // Elden combat: replace local matrices of masked bones (retargeted Elden Ring pose)
     void               setBoneOverride(const std::vector<Tempest::Matrix4x4>& local, const std::vector<uint8_t>& mask, float weight);
     void               clearBoneOverride();
+    // diagnostics
+    bool               isSampled(size_t node) const { return node<Resources::MAX_NUM_SKELETAL_NODES && hasSamples[node]!=S_None; }
+    float              overrideWeight() const { return ovrWeight; }
+    bool               isOverridden(size_t node) const { return ovrWeight>0.f && node<ovrMask.size() && ovrMask[node]; }
 
     float              translateY() const { return trY; }
     auto               rootNode() const -> const Tempest::Matrix4x4;

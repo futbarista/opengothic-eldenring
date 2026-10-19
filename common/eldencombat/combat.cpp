@@ -583,6 +583,8 @@ namespace EldenCombat
         mStamina = std::max(0.f, mStamina - nonnegative(normalizedCost) * mConfig.mMaximumStamina / 100.f);
         if (result)
             result->mStaminaSpent += before - mStamina;
+        if (before > mStamina)
+            mRegenDelay = std::max(mRegenDelay, mStamina <= 0.f ? 1.2f : 0.4f);
     }
 
     bool Controller::leftButtonAttacks(const Input& input) const
@@ -904,6 +906,7 @@ namespace EldenCombat
     {
         if (mAction == Action::Dead)
             return;
+        mRegenDelay = std::max(0.f, mRegenDelay - seconds);
         const float frames = seconds * AnimationFps;
         mGrounded = input.mGrounded;
         mFlying = input.mFlying;
@@ -956,7 +959,8 @@ namespace EldenCombat
             {
                 const BufferedRequest request = *mBuffer;
                 mBuffer.reset();
-                if (mStamina > 0.f || (request.mRequest == Request::Dodge && mConfig.mDodgeStaminaMultiplier == 0.f))
+                const bool exhausted = mStamina <= 0.f || (mStamina < 1.f && mRegenDelay > 0.f);
+                if (!exhausted || (request.mRequest == Request::Dodge && mConfig.mDodgeStaminaMultiplier == 0.f))
                 {
                     startRequest(request, input, result);
                     if (mAction != Action::Idle)
@@ -1050,7 +1054,8 @@ namespace EldenCombat
             {
                 const BufferedRequest request = *mBuffer;
                 mBuffer.reset();
-                if (mStamina > 0.f || (request.mRequest == Request::Dodge && mConfig.mDodgeStaminaMultiplier == 0.f))
+                const bool exhausted = mStamina <= 0.f || (mStamina < 1.f && mRegenDelay > 0.f);
+                if (!exhausted || (request.mRequest == Request::Dodge && mConfig.mDodgeStaminaMultiplier == 0.f))
                 {
                     const std::uint64_t previousSequence = mSequence;
                     startRequest(request, input, result);
@@ -1065,7 +1070,7 @@ namespace EldenCombat
                     || mFrame >= mDef.mDuration))
                 start(Action::Idle, input, &result);
         }
-        if (regenerate)
+        if (regenerate && mRegenDelay <= 0.f)
         {
             const float before = mStamina;
             const float multiplier = mGuarding ? mConfig.mGuardRegenMultiplier : 1.f;

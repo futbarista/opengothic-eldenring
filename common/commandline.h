@@ -50,6 +50,10 @@ class CommandLine {
     std::string_view    defaultSave()      const { return saveDef;    }
     bool                isEldenCombat()    const { return eldenCombat;  }
     bool                isEldenDebug()     const { return eldenDebug;   }
+    bool                isEldenTestChar()  const { return eldenTestChar; }
+    // borderless window of a fixed size, centered (e.g. 16:9 on an ultrawide monitor for recording)
+    int                 borderlessW()      const { return bdlW; }
+    int                 borderlessH()      const { return bdlH; }
     std::string_view    eldenAnims()       const { return eldenAnimsPath; }
 
     std::string         wrldDef;
@@ -84,6 +88,8 @@ class CommandLine {
     uint32_t            aaPresetId = 0;
     bool                eldenCombat  = false;
     bool                eldenDebug   = false;
+    bool                eldenTestChar = false;
+    int                 bdlW = 0, bdlH = 0;
     std::string         eldenAnimsPath;
   };
 

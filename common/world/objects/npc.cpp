@@ -19,6 +19,7 @@
 #include "utils/dbgpainter.h"
 #include "camera.h"
 #include "gothic.h"
+#include "commandline.h"
 #include "resources.h"
 
 using namespace Tempest;
@@ -1811,8 +1812,8 @@ bool Npc::implAttack(uint64_t dt) {
       aiState.loopNextTime = owner.tickCount(); // force ZS_MM_Attack_Loop call
       return true;
       }
-    if(erActor!=nullptr) {
-      erActor->aiDodge(0.f,0.f); // Elden backstep with i-frames
+    if(erActor!=nullptr && !isMonster()) {
+      erActor->aiDodge(0.f,0.f); // humans: Elden backstep with i-frames (orcs & co. jump back natively)
       implFaiWait(700);
       fghAlgo.consumeAction();
       return true;
@@ -4956,4 +4957,5 @@ void Npc::updateAnimation(uint64_t dt, bool force) {
   bool syncAtt = visual.updateAnimation(this,nullptr,owner,dt,force);
   if(syncAtt)
     visual.syncAttaches();
+
   }

@@ -43,6 +43,10 @@ class EldenRetarget final {
     // rotation slerp + translation lerp of two local bone matrices
     static Tempest::Matrix4x4 blend(const Tempest::Matrix4x4& a, const Tempest::Matrix4x4& b, float t);
 
+    // Gothic's two-handed animations move the right-hand slot (so a big weapon sits between the
+    // hands); under an Elden pose that offset must stay fixed to the hand instead of following them
+    void  setTwoHandedSlot(bool t) { slot2H = t; }
+
     float weight() const { return wOverride; }
     const std::vector<Tempest::Matrix4x4>& local() const { return shownLocal; }
     const std::vector<uint8_t>&            mask()  const { return maskBones; }
@@ -80,6 +84,8 @@ class EldenRetarget final {
     using Joints = std::array<Tempest::Vec3,JointCount>;
 
     void   samplePositions(const std::vector<float>& smp, float yaw, Joints& out, Tempest::Vec3& headUp, Tempest::Vec3& headFwd) const;
+    Mat3   weaponFrame(const std::vector<float>& smp, float yaw) const;
+    void   initWeaponSlot(const Skeleton& sk);
     Body   anatomy(const Joints& p) const;
     Mat3   jointFrame(size_t j, const Joints& p, const Body& b, const Tempest::Vec3& headUp, const Tempest::Vec3& headFwd,
                       std::array<Tempest::Vec3,10>* planes) const;
@@ -104,6 +110,14 @@ class EldenRetarget final {
     std::vector<Tempest::Matrix4x4>   restLocal, restModel;
     std::vector<uint8_t>              maskBones;
     std::vector<size_t>               order;        // parents before children
+
+    // right-hand weapon slot oriented from Elden Ring's R_Weapon bone (blade direction)
+    size_t                            weaponSlot    = size_t(-1);
+    size_t                            srcWeaponAxes = size_t(-1);
+    Mat3                              weaponCorr;
+    size_t                            handSlot = size_t(-1);
+    Tempest::Matrix4x4                slot2HLocal;
+    bool                              slot2H = false;
 
     std::array<BendPlane,10>          planes;
     std::vector<float>                smp;

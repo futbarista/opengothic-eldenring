@@ -1265,9 +1265,6 @@ static bool isMeleeDrawn(const Npc* pl) {
   return ws==WeaponState::Fist || ws==WeaponState::W1H || ws==WeaponState::W2H;
   }
 
-static bool canFinishTarget(Npc* pl) {
-  return pl!=nullptr && pl->target()!=nullptr && pl->canFinish(*pl->target()) && !pl->isAttackAnim();
-  }
 
 bool PlayerControl::eldenKey(Tempest::KeyEvent::KeyType key, bool down) {
   using K = Tempest::KeyEvent;
@@ -1331,8 +1328,8 @@ bool PlayerControl::eldenMouse(Tempest::Event::MouseButton b, bool down) {
 
   if(b==Tempest::Event::ButtonLeft) {
     if(down) {
-      if(!isMeleeDrawn(pl) || canFinishTarget(pl))
-        return false; // native: interaction, bow, magic, finishing move
+      if(!isMeleeDrawn(pl))
+        return false; // native: interaction, bow, magic (finishing move = hold light attack)
       lmbHeavy = shiftHeld;
       lmbElden = true;
       e.setButton(lmbHeavy ? EldenPlayer::Heavy : EldenPlayer::Light,true);
@@ -1415,7 +1412,7 @@ void PlayerControl::tickGamepad(uint64_t /*dt*/) {
     const bool melee = isMeleeDrawn(pl);
     auto elden = [&](Gamepad::Button b, EldenPlayer::Button eb, KeyCodec::Action fallback) {
       if(gp.pressed(b)) {
-        if(melee && !(b==Gamepad::RB && canFinishTarget(pl))) {
+        if(melee) {
           padElden |= b;
           e.setButton(eb,true);
           }

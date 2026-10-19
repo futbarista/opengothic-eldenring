@@ -52,7 +52,23 @@ MainWindow::MainWindow(Device& device)
     setWindowTitle("Gothic II"); else
     setWindowTitle("Gothic");
 
-  if(!CommandLine::inst().isWindowMode()) {
+  if(CommandLine::inst().borderlessW()>0) {
+#if defined(_WIN32)
+    // fixed-size borderless window, centered on the monitor the window is on
+    HWND h = reinterpret_cast<HWND>(hwnd());
+    const int w  = CommandLine::inst().borderlessW();
+    const int hh = CommandLine::inst().borderlessH();
+    MONITORINFO mi = {};
+    mi.cbSize = sizeof(mi);
+    GetMonitorInfoW(MonitorFromWindow(h,MONITOR_DEFAULTTONEAREST),&mi);
+    const int x = mi.rcMonitor.left + ((mi.rcMonitor.right -mi.rcMonitor.left)-w)/2;
+    const int y = mi.rcMonitor.top  + ((mi.rcMonitor.bottom-mi.rcMonitor.top )-hh)/2;
+    ShowWindow(h,SW_RESTORE);
+    SetWindowLongPtrW(h,GWL_STYLE,WS_POPUP|WS_VISIBLE);
+    SetWindowPos(h,HWND_TOP,x,y,w,hh,SWP_FRAMECHANGED|SWP_SHOWWINDOW);
+#endif
+    }
+  else if(!CommandLine::inst().isWindowMode()) {
     setFullscreen(true);
     }
 
@@ -335,7 +351,7 @@ void MainWindow::resizeEvent(SizeEvent&) {
   if(auto camera = Gothic::inst().camera())
     camera->setViewport(swapchain.w(),swapchain.h());
 
-  if(SystemApi::isFullscreen(hwnd())) {
+  if((SystemApi::isFullscreen(hwnd()) || CommandLine::inst().borderlessW()>0)) {
     setCursorPosition(Point(w()/2,h()/2));
     }
 
@@ -366,7 +382,7 @@ void MainWindow::mouseUpEvent(MouseEvent &event) {
   }
 
 void MainWindow::mouseDragEvent(MouseEvent &event) {
-  const bool fs = SystemApi::isFullscreen(hwnd());
+  const bool fs = (SystemApi::isFullscreen(hwnd()) || CommandLine::inst().borderlessW()>0);
   if(!mouseP[Event::ButtonLeft] && !fs)
     return;
   if(player.focus().npc && !fs)
@@ -375,7 +391,7 @@ void MainWindow::mouseDragEvent(MouseEvent &event) {
   }
 
 void MainWindow::mouseMoveEvent(MouseEvent &event) {
-  processMouse(event,SystemApi::isFullscreen(hwnd()));
+  processMouse(event,(SystemApi::isFullscreen(hwnd()) || CommandLine::inst().borderlessW()>0));
   }
 
 void MainWindow::processMouse(MouseEvent& event, bool enable) {
@@ -729,7 +745,7 @@ void MainWindow::focusEvent(FocusEvent &event) {
     return;
   dMouse = Point();
 
-  if(SystemApi::isFullscreen(hwnd()))
+  if((SystemApi::isFullscreen(hwnd()) || CommandLine::inst().borderlessW()>0))
     setCursorPosition(Point(w()/2,h()/2));
   }
 
@@ -1120,7 +1136,7 @@ void MainWindow::tickCamera(uint64_t dt) {
 
   camera.setTightFollow(pl!=nullptr && EldenPlayer::inst().freeCamera(*pl));
   if(!camera.isCutscene() && !camera.isFree()) {
-    const bool fs = SystemApi::isFullscreen(hwnd());
+    const bool fs = (SystemApi::isFullscreen(hwnd()) || CommandLine::inst().borderlessW()>0);
     if(!fs && mouseP[Event::ButtonLeft]) {
       camera.setSpin(camera.spin());
       camera.setTarget(pos);

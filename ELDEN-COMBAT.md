@@ -21,7 +21,10 @@ Bez nich gra działa na zastępczych timingach i natywnych animacjach Gothica.
 Pad: najlepiej uruchamiać przez Steam (np. jako „grę spoza Steama”), wtedy Steam Input
 udostępnia każdy kontroler, także Steam Controller, jako pad XInput.
 Parametry: `-eldencombat` (włącza walkę ER), `-eldenanims <ścieżka do player_anims.bin>`,
-`-eldendebug` (log akcji w `log.txt`).
+`-eldendebug` (log akcji w `log.txt`), `-borderless [SZERxWYS]` (okno bez ramek o stałym
+rozmiarze, wyśrodkowane – np. 1920x1080 na monitorze 21:9 do nagrywania 16:9),
+`-eldentestchar` (narzędzie deweloperskie: z `-w OldWorld.zen -nomenu` tworzy silną postać
+z mieczem jednoręcznym przy obozie orków w Górniczej Dolinie, w dzień, i zapisuje ją w slocie 5).
 
 ```
 build-elden.bat      – budowanie (VS 2022 Build Tools, Ninja, Vulkan SDK)
@@ -56,6 +59,11 @@ Gothica, ale logikę ER**: kontroler w trybie natywnym bierze czas ataku i okno 
 własnej animacji `S_FISTATTACK` (optymalna klatka), pilnuje przerw między seriami, odskok
 (MV_JUMPBACK) daje i-frames; ruch i animacje zostają natywne. Decyzja dla każdego modelu jest
 w logu (`elden: skeleton '...' -> ...`).
+
+Przewroty i backstepy robią tylko ludzie; orki i humanoidalne potwory (jak wrogowie w ER)
+blokują albo przyjmują cios, a rozkaz odskoku z AI Gothica wykonują natywnym odskokiem.
+Broń dwuręczna NPC i gracza: slot dłoni ma pod pozą ER stałe położenie z postawy `S_2H`
+(w animacjach 2H Gothic przesuwa slot, żeby duży miecz leżał między dłońmi).
 
 **Poise wrogów** (NPC i potwory, jak w ER): z siły, poziomu, HP i pancerza (`poiseFromStats`,
 maks. 45). Dopóki poise trzyma, cios zadaje obrażenia Gothica, ale nie przerywa akcji wroga
@@ -100,7 +108,9 @@ na zegarze tego kontrolera (`common/game/eldenplayer.cpp`):
 * Obrona gracza: unik (i-frames) i blok rozstrzyga kontroler ER – zablokowany cios nie
   zadaje obrażeń, przy braku staminy gardę łamie; zwykłe trafienie idzie natywną ścieżką
   (obrażenia + natywne zachwianie). Nietykalność uniku działa też na czary.
-* Stamina: żółty pasek na dole ekranu; poza walką sprint jest darmowy.
+* Stamina: żółty pasek na dole ekranu; poza walką sprint jest darmowy. Jak w ER regeneracja
+  rusza ~0,4 s po wydatku, a opróżnienie paska to wyczerpanie: ~1,2 s bez regeneracji i bez
+  ataków, przewrotów i sprintu.
 * Kamera jak w Elden Ringu: mysz/prawa gałka obracają tylko kamerę, postać biegnie przodem
   w stronę wskazaną względem kamery (8 i więcej kierunków, „do tyłu” = zawraca i biegnie do kamery).
   Uniki idą tam, gdzie wskazuje gałka na ekranie. Łuk, kusza i magia mają klasyczną kamerę.
@@ -113,7 +123,8 @@ na zegarze tego kontrolera (`common/game/eldenplayer.cpp`):
   albo oburącz (G / Y+RB, tylko poza akcją). Nowa broń startuje w swoim naturalnym chwycie.
   Oburęczny chwyt broni jednoręcznej: obrażenia ×1,25; broń dwuręczna oburącz ×1,0,
   w jednej ręce ×0,75. Chwyt wybiera też zestaw animacji i timingów ER (one-/two-handed).
-* Dobijanie ogłuszonych (finishing move) zostaje natywne: LPM/RB na leżącym celu.
+* Dobijanie ogłuszonych: **przytrzymaj lekki atak** (LPM/RB, ~0,4 s) przy leżącym przeciwniku –
+  gothicowy finishing move.
 * Łuk, kusza i magia działają po staremu.
 
 ## Sterowanie

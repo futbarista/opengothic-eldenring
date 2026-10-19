@@ -11,6 +11,7 @@
 #include "world/objects/npc.h"
 #include "world/objects/item.h"
 #include "world/world.h"
+#include "world/waypoint.h"
 #include "commandline.h"
 #include "gothic.h"
 
@@ -131,9 +132,10 @@ void EldenPlayer::aiTick(Npc& npc, float dt) {
       const float dist = (tg->position()-npc.position()).length();
       if(dist<400.f && ctrl.action()==EAction::Idle && tactics.consumeReaction(0.18f)) {
         const int r = int(npc.world().script().rand(100));
-        if(r<15)
+        // like Elden Ring enemies: only humans roll and backstep, creatures and orcs guard or take it
+        if(r<15 && !npc.isMonster())
           aiDodge(0.f,0.f);         // backstep
-        else if(r<30)
+        else if(r<30 && !npc.isMonster())
           aiDodge(r%2==0 ? 1.f : -1.f, 0.f); // side roll
         else if(r<45)
           aiGuard(0.5f);
@@ -347,6 +349,40 @@ float EldenPlayer::gripDamageMultiplier(const Npc& pl) {
   return two ? 1.25f : 1.f;   // both hands on a one-handed weapon hit harder
   }
 
+void EldenPlayer::tryFinisher(Npc& pl, float dt) {
+  // hold light attack next to a knocked-out enemy: Gothic's finishing move
+  lightHoldTime = btn[Light].mHeld ? lightHoldTime+dt : 0.f;
+  if(lightHoldTime<0.4f || ctrl.action()!=EAction::Idle && !EldenCombat::Controller::isAttack(ctrl.action()))
+    return;
+  const auto ws = pl.weaponState();
+  if(ws!=WeaponState::W1H && ws!=WeaponState::W2H)
+    return;
+  auto& w = pl.world();
+  Npc*  best = nullptr;
+  float bestD = 0;
+  for(uint32_t i=0; i<w.npcCount(); ++i) {
+    auto npc = w.npcById(i);
+    if(npc==nullptr || npc==&pl || !npc->isUnconscious() || !pl.canFinish(*npc))
+      continue;
+    const float d = (npc->position()-pl.position()).quadLength();
+    if(best==nullptr || d<bestD) {
+      best  = npc;
+      bestD = d;
+      }
+    }
+  if(best==nullptr)
+    return;
+  ctrl.cancelInputActions();
+  if(driving)
+    stopDrive(pl,false);
+  btn[Light] = EldenCombat::Button();
+  lightHoldTime = 0.f;
+  pl.setTarget(best);
+  auto dp = best->position()-pl.position();
+  pl.setDirection(float(std::atan2(dp.z,dp.x)*180.0/3.14159265358979323846));
+  pl.finishingMove();
+  }
+
 bool EldenPlayer::showStamina() const {
   return isEnabled() && (active || stamina<99.5f || staminaShowTime>0.f);
   }
@@ -450,7 +486,89 @@ void EldenPlayer::deactivate(Npc& pl) {
   lockedMove = false;
   }
 
+// Dev helper (-eldentestchar): a strong one-handed fighter near the orcs of the Mining Valley,
+// saved to slot 5. Start with "-w OldWorld.zen -nomenu".
+static void eldenTestCharacter(Npc& pl) {
+  static int stage = 0;
+  static uint64_t t0 = 0;
+  if(stage>=3 || !CommandLine::inst().isEldenTestChar() || !pl.isPlayer())
+    return;
+  auto& w   = pl.world();
+  auto& scr = w.script();
+  const uint64_t now = w.tickCount();
+  if(stage==0) {
+    t0    = now;
+    stage = 1;
+    return;
+    }
+  if(stage==1 && now>t0+3000) {
+    auto& h = pl.handle();
+    h.level    = 30;
+    h.exp      = 500*30*31/2;
+    h.exp_next = 500*31*32/2;
+    h.lp       = 20;
+    h.attribute[ATR_STRENGTH]     = 160;
+    h.attribute[ATR_DEXTERITY]    = 80;
+    h.attribute[ATR_HITPOINTSMAX] = 700;
+    h.attribute[ATR_HITPOINTS]    = 700;
+    h.attribute[ATR_MANAMAX]      = 60;
+    h.attribute[ATR_MANA]         = 60;
+    h.hitchance[TALENT_1H] = 90;
+    h.hitchance[TALENT_2H] = 60;
+    pl.setTalentSkill(TALENT_1H,2);
+    pl.setTalentValue(TALENT_1H,90);
+    pl.setTalentSkill(TALENT_2H,1);
+    pl.setTalentValue(TALENT_2H,60);
+
+    auto give = [&](std::string_view name, size_t n, bool equip) {
+      const size_t id = scr.findSymbolIndex(name);
+      if(id==size_t(-1)) {
+        Log::e("elden testchar: no item ",std::string(name));
+        return;
+        }
+      pl.addItem(id,n);
+      if(equip)
+        pl.useItem(id);
+      };
+    give("ITAR_DJG_H",1,true);
+    give("ITMW_1H_SPECIAL_04",1,true);
+    give("ITPO_HEALTH_03",15,false);
+    give("ITPO_HEALTH_ADDON_04",3,false);
+
+    // a little away from an orc camp
+    const WayPoint* orc = nullptr;
+    for(auto n:{"OW_ORC_LOOKOUT_2_02","OW_ORC_LOOKOUT_2_03","OW_ORC_ORCDOG_SPAWN01"}) {
+      orc = w.findWayPoint(n);
+      if(orc!=nullptr)
+        break;
+      }
+    if(orc!=nullptr) {
+      const auto at   = orc->position();
+      auto       near = w.findWayPoint(at,[&](const WayPoint& p) {
+        const float d = (p.position()-at).length();
+        return d>1800.f && d<3500.f;
+        });
+      pl.setPosition(near!=nullptr ? near->position() : at);
+      pl.setDirection(at);
+      Log::i("elden testchar: placed near ",orc->name);
+      } else {
+      Log::e("elden testchar: no orc waypoint found");
+      }
+    w.setDayTime(10,0); // daylight
+    Gothic::inst().onPrint("Elden test: postać gotowa, zapis za chwilę (slot 5)");
+    t0    = now;
+    stage = 2;
+    return;
+    }
+  if(stage==2 && now>t0+2500) {
+    Gothic::inst().save("save_slot_5.sav","Elden: Gornicza Dolina, orki");
+    Log::i("elden testchar: saved to save_slot_5.sav");
+    stage = 3;
+    }
+  }
+
 void EldenPlayer::tick(Npc& pl, uint64_t dt) {
+  eldenTestCharacter(pl);
   const float dtF = float(dt)/1000.f;
   staminaShowTime = std::max(0.f,staminaShowTime-dtF);
 
@@ -493,6 +611,8 @@ void EldenPlayer::tick(Npc& pl, uint64_t dt) {
 
   if(!pl.isPlayer())
     aiTick(pl,dtF);
+  else
+    tryFinisher(pl,dtF);
 
   EldenCombat::Input in;
   const bool unarmed = pl.weaponState()==WeaponState::NoWeapon;
@@ -697,6 +817,7 @@ void EldenPlayer::updatePose(Npc& pl, const EldenCombat::Update* up, float dt) {
     }
 
   bool played = false;
+  rig.setTwoHandedSlot(pl.weaponState()==WeaponState::W2H);
   try {
     played = !clip.empty() && rig.play(clip,frame,loop,advance,yaw);
     }

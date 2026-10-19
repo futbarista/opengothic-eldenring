@@ -8,6 +8,8 @@
 #include <fstream>
 
 #include "eldencombat/animations.hpp"
+#include "eldencombat/combat.hpp"
+#include "graphics/mesh/animmath.h"
 #include "graphics/mesh/skeleton.h"
 #include "commandline.h"
 
@@ -336,6 +338,47 @@ void EldenRetarget::samplePositions(const std::vector<float>& s, float yaw, Join
     }
   }
 
+EldenRetarget::Mat3 EldenRetarget::weaponFrame(const std::vector<float>& s, float yaw) const {
+  const float c = std::cos(yaw), sn = std::sin(yaw);
+  auto src = [&](size_t off) {
+    const float x = s[off], y = s[off+1], z = s[off+2];
+    return toGothic*Vec3(c*x - sn*z, y, sn*x + c*z);
+    };
+  // built like every joint frame, so a reflected source basis cancels in the calibration
+  return frame(src(srcWeaponAxes),src(srcWeaponAxes+3));
+  }
+
+void EldenRetarget::initWeaponSlot(const Skeleton& sk) {
+  weaponSlot    = size_t(-1);
+  srcWeaponAxes = eran->axesOffset("R_Weapon").value_or(size_t(-1));
+  const size_t slot = sk.findNode("ZS_RIGHTHAND");
+  const auto*  s1h  = sk.sequence("S_1H");
+  const auto   clip = EldenCombat::stanceAnimation(EldenCombat::WeaponClass::StraightSword,false,0);
+  const auto*  er   = eran->find(clip);
+  if(srcWeaponAxes==size_t(-1) || slot>=sk.nodes.size() || s1h==nullptr || s1h->data==nullptr || er==nullptr)
+    return;
+
+  // Gothic: where its own one-handed stance puts the sword slot (model space, frame 0)
+  const auto&  d  = *s1h->data;
+  const size_t n  = sk.nodes.size();
+  std::vector<Matrix4x4> loc = restLocal, mdl(n);
+  if(!d.nodeIndex.empty() && d.samples.size()>=d.nodeIndex.size())
+    for(size_t i=0; i<d.nodeIndex.size(); ++i)
+      if(d.nodeIndex[i]<n)
+        loc[d.nodeIndex[i]] = mkMatrix(d.samples[i]);
+  for(size_t i:order) {
+    const size_t p = sk.nodes[i].parent;
+    mdl[i] = p<n ? mdl[p] : Matrix4x4::mkIdentity();
+    mdl[i].mul(loc[i]);
+    }
+  // Elden Ring: the weapon bone in the matching one-handed stance
+  std::vector<float> tmp;
+  eran->sample(*er,0.f,false,tmp);
+  weaponCorr = weaponFrame(tmp,0.f).transposed()*rotationOf(mdl[slot]);
+  weaponSlot = slot;
+  maskBones[slot] = 1;
+  }
+
 EldenRetarget::Body EldenRetarget::anatomy(const Joints& p) const {
   Body b;
   b.up            = unit(p[Neck]-p[Pelvis],bindUp);
@@ -548,6 +591,21 @@ bool EldenRetarget::init(const Skeleton& sk) {
   scale           = srcLeg>1e-5f ? dstLeg/srcLeg : 100.f;
   srcPelvisHeight = dot(ref[Pelvis],bindUp);
 
+  // weapon-bone alignment (initWeaponSlot) is disabled: Gothic's hand slot already holds the
+  // weapon correctly under the retargeted hand, the calibration flipped the grip
+
+  // two-handed slot offset relative to the hand, from Gothic's own two-handed stance
+  handSlot = sk.findNode("ZS_RIGHTHAND");
+  if(handSlot<n) {
+    slot2HLocal = restLocal[handSlot];
+    if(auto s2h = sk.sequence("S_2H"); s2h!=nullptr && s2h->data!=nullptr) {
+      auto& d = *s2h->data;
+      for(size_t i=0; i<d.nodeIndex.size() && i<d.samples.size(); ++i)
+        if(d.nodeIndex[i]==handSlot)
+          slot2HLocal = mkMatrix(d.samples[i]);
+      }
+    }
+
   targetLocal = restLocal;
   fromLocal   = restLocal;
   shownLocal  = restLocal;
@@ -634,7 +692,16 @@ bool EldenRetarget::play(std::string_view clipName, float frame, bool loop, floa
     const size_t parent = skel->nodes[i].parent;
     const Matrix4x4 parentModel = parent<n ? model[parent] : Matrix4x4::mkIdentity();
     const size_t j = jointOf[i];
-    if(j==JointCount) {
+    if(i==handSlot && slot2H) {
+      targetLocal[i] = slot2HLocal;
+      }
+    else if(i==weaponSlot) {
+      // blade follows Elden Ring's weapon bone, the grip stays where Gothic puts it in the hand
+      const Mat3 want      = weaponFrame(smp,yaw)*weaponCorr;
+      const Mat3 parentRot = parent<n ? rotationOf(parentModel) : Mat3();
+      targetLocal[i] = compose(parentRot.transposed()*want,translationOf(restLocal[i]));
+      }
+    else if(j==JointCount) {
       targetLocal[i] = restLocal[i];
       } else {
       const Mat3 want      = jointFrame(j,p,body,headUp,headFwd,&pl)*correction[i];
@@ -654,6 +721,9 @@ bool EldenRetarget::play(std::string_view clipName, float frame, bool loop, floa
     model[i] = parentModel;
     model[i].mul(targetLocal[i]);
     }
+
+  if(handSlot<n)
+    maskBones[handSlot] = slot2H ? 1 : 0;
 
   // crossfade between Elden clips, fade in over the native pose
   fade += dt;

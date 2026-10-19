@@ -1,5 +1,7 @@
 #include "commandline.h"
 
+#include <cstdio>
+
 #include <Tempest/Log>
 #include <Tempest/TextCodec>
 #include <cstring>
@@ -94,6 +96,21 @@ CommandLine::CommandLine(int argc, const char** argv) {
       }
     else if(arg=="-eldendebug") {
       eldenDebug = true;
+      }
+    else if(arg=="-eldentestchar") {
+      eldenTestChar = true;
+      }
+    else if(arg=="-borderless") {
+      bdlW = 1920;
+      bdlH = 1080;
+      if(i+1<argc && argv[i+1][0]!='-') {
+        ++i;
+        int w = 0, h = 0;
+        if(std::sscanf(argv[i],"%dx%d",&w,&h)==2 && w>0 && h>0) {
+          bdlW = w;
+          bdlH = h;
+          }
+        }
       }
     else if(arg=="-eldenanims") {
       ++i;

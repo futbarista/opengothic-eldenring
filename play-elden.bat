@@ -9,4 +9,4 @@ set GAME=C:\Program Files (x86)\Steam\steamapps\common\Gothic II
 set OPENGOTHIC_ELDEN_ANIMS=D:\OpenMW-EldenRing\ELDEN-RING-Combat-Rewrite\assets\player_anims.bin
 set EXE=%~dp0build\opengothic\Gothic2Notr.exe
 cd /d "%~dp0build\opengothic"
-start "" /wait "%EXE%" -g "%GAME%" -eldencombat
+start "" /wait "%EXE%" -g "%GAME%" -eldencombat -eldenanims "%OPENGOTHIC_ELDEN_ANIMS%" -borderless 1920x1080

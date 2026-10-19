@@ -435,6 +435,9 @@ namespace EldenCombat
         // This only continues an existing sprint; all action gates use mGrounded.
         float mSprintGroundGraceRemaining = 0.f;
         float mHitStopSeconds = 0.f;
+        // Elden Ring stamina: recovery starts shortly after spending; emptying the bar
+        // exhausts it (longer pause, no new attacks/rolls until it refills a little)
+        float mRegenDelay = 0.f;
         float mPostHitProtectionRemaining = 0.f;
         float mCriticalSeconds = 0.f;
         float mSinceHitSeconds = 0.f;

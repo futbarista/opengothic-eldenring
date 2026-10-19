@@ -87,6 +87,7 @@ class EldenPlayer final {
 
   private:
     void     aiTick(Npc& npc, float dt);
+    void     tryFinisher(Npc& pl, float dt);
 
     struct Native {
       const Animation::Sequence* sq        = nullptr;
@@ -158,6 +159,7 @@ class EldenPlayer final {
 
     EldenCombat::AiTactics  tactics;
     float                   aiGuardTime = 0.f;
+    float                   lightHoldTime = 0.f;
     int                     aiTapLight = 0, aiTapHeavy = 0, aiTapDodge = 0;
     float                   aiDodgeX = 0.f, aiDodgeY = 0.f;
     Tempest::Vec3           smoothVel;       // cm per ms, actor-local
