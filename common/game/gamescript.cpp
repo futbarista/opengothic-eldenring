@@ -1076,6 +1076,22 @@ void GameScript::invokeState(const std::shared_ptr<zenkit::INpc>& hnpc, const st
   vm.call_function<void>(id);
   }
 
+void GameScript::eldenAlarm(Npc& witness, Npc& attacker, bool murder) {
+  auto* fn = vm.find_symbol_by_name("B_Attack");
+  auto* ar = vm.find_symbol_by_name(murder ? "AR_HumanMurderedHuman" : "AR_ReactToDamage");
+  if(fn==nullptr || ar==nullptr)
+    return;
+  ScopeCtx ctx  (*this, witness.processPolicy());
+  ScopeVar self (*vm.global_self(),  witness.handlePtr());
+  ScopeVar other(*vm.global_other(), attacker.handlePtr());
+  try {
+    vm.call_function<void>(fn, witness.handlePtr(), attacker.handlePtr(), ar->get_int(), int32_t(0));
+    }
+  catch(const std::exception& e) {
+    Log::e("elden: B_Attack failed: ",e.what());
+    }
+  }
+
 int GameScript::invokeState(Npc* npc, Npc* oth, Npc* vic, ScriptFn fn) {
   if(!fn.isValid())
     return 0;

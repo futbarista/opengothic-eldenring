@@ -55,6 +55,7 @@ class CommandLine {
     int                 borderlessW()      const { return bdlW; }
     int                 borderlessH()      const { return bdlH; }
     std::string_view    eldenAnims()       const { return eldenAnimsPath; }
+    std::string_view    eldenTeleport()    const { return eldenTeleportWp; }
 
     std::string         wrldDef;
 
@@ -91,5 +92,6 @@ class CommandLine {
     bool                eldenTestChar = false;
     int                 bdlW = 0, bdlH = 0;
     std::string         eldenAnimsPath;
+    std::string         eldenTeleportWp;
   };
 

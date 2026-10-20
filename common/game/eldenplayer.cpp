@@ -50,7 +50,6 @@ bool isNativeOwned(EAction a) {
     case EAction::HurtLarge:
     case EAction::Knockdown:
     case EAction::StanceBreak:
-    case EAction::Critical:
     case EAction::Dead:
       return true;
     default:
@@ -77,7 +76,7 @@ void EldenPlayer::aiDodge(float x, float y) {
   }
 
 bool EldenPlayer::aiAttack(Npc& npc) {
-  if(!ownsMelee(npc) || npc.weaponState()==WeaponState::NoWeapon)
+  if(!ownsMelee(npc) || npc.weaponState()==WeaponState::NoWeapon || isStunned())
     return false;
   const bool idle      = ctrl.action()==EAction::Idle;
   const bool attacking = EldenCombat::Controller::isAttack(ctrl.action());
@@ -125,7 +124,7 @@ void EldenPlayer::aiTick(Npc& npc, float dt) {
 
   // Elden-style reaction: sometimes dodge the player's swing instead of eating it
   auto tg = npc.target();
-  if(!nativeAnims && tg!=nullptr && tg->isPlayer() && ownsMelee(npc) && npc.weaponState()!=WeaponState::NoWeapon) {
+  if(!nativeAnims && !isStunned() && tg!=nullptr && tg->isPlayer() && ownsMelee(npc) && npc.weaponState()!=WeaponState::NoWeapon) {
     auto te = tg->eldenActorIfAny();
     if(te!=nullptr && te->ownsMelee(*tg)) {
       tactics.observeThreat(te->controller(),dt);
@@ -250,6 +249,8 @@ bool EldenPlayer::ownsMelee(const Npc& pl) const {
   }
 
 bool EldenPlayer::blocksLocomotion(const Npc& pl) const {
+  if(isStunned())
+    return true; // held by an opponent's critical
   if(!ownsMelee(pl))
     return false;
   return driving || lockedMove || actionOwnsMotion();
@@ -486,6 +487,69 @@ void EldenPlayer::deactivate(Npc& pl) {
   lockedMove = false;
   }
 
+// Dev helper (-eldenteleport <waypoint, name prefix or npc name>): after loading a save, move the
+// player there in daylight (switching to the Mining Valley if needed) and save to slot 6.
+// Start with "-save <n>", e.g. "-eldenteleport Garond" for the castle.
+static void eldenTeleport(Npc& pl) {
+  static int stage = 0;
+  static uint64_t t0 = 0;
+  const auto wp = CommandLine::inst().eldenTeleport();
+  if(stage>=3 || wp.empty() || !pl.isPlayer())
+    return;
+  auto& w = pl.world();
+  const uint64_t now = w.tickCount();
+  if(stage==0) {
+    t0    = now;
+    stage = 1;
+    return;
+    }
+  if(stage==1 && now>t0+3000) {
+    const WayPoint* p = w.findPoint(wp,false); // waypoints and free points
+    if(p==nullptr)
+      p = w.findWayPoint(pl.position(),[&](const WayPoint& x) { return x.name.rfind(wp,0)==0; });
+    Npc* host = nullptr; // or next to an npc of that name
+    for(uint32_t i=0; p==nullptr && host==nullptr && i<w.npcCount(); ++i)
+      if(auto n = w.npcById(i); n!=nullptr && n!=&pl && n->displayName()==wp)
+        host = n;
+    if(host!=nullptr) {
+      const float a = host->rotationRad();
+      const WayPoint* near = w.findWayPoint(host->position()+Vec3(std::cos(a),0,std::sin(a))*150.f);
+      pl.setPosition(near!=nullptr ? near->position() : host->position());
+      Log::i("elden teleport: point ",near!=nullptr ? near->name : std::string("-"));
+      pl.setDirection(host->position()-pl.position());
+      Log::i("elden teleport: next to ",std::string(wp));
+      w.setDayTime(10,0);
+      t0    = now;
+      stage = 2;
+      return;
+      }
+    static bool changed = false;
+    if(p==nullptr && !changed) {
+      // not in this world: go to the Mining Valley, then look again
+      changed = true;
+      w.triggerChangeWorld("OldWorld.zen",wp);
+      Log::i("elden teleport: changing world to OldWorld.zen");
+      stage = 0;
+      return;
+      }
+    if(p!=nullptr) {
+      pl.setPosition(p->position());
+      Log::i("elden teleport: ",p->name);
+      } else {
+      Log::e("elden teleport: no point or npc ",std::string(wp));
+      }
+    w.setDayTime(10,0);
+    t0    = now;
+    stage = 2;
+    return;
+    }
+  if(stage==2 && now>t0+2500) {
+    Gothic::inst().save("save_slot_6.sav","Elden: Zamek");
+    Log::i("elden teleport: saved to save_slot_6.sav");
+    stage = 3;
+    }
+  }
+
 // Dev helper (-eldentestchar): a strong one-handed fighter near the orcs of the Mining Valley,
 // saved to slot 5. Start with "-w OldWorld.zen -nomenu".
 static void eldenTestCharacter(Npc& pl) {
@@ -569,8 +633,10 @@ static void eldenTestCharacter(Npc& pl) {
 
 void EldenPlayer::tick(Npc& pl, uint64_t dt) {
   eldenTestCharacter(pl);
+  eldenTeleport(pl);
   const float dtF = float(dt)/1000.f;
   staminaShowTime = std::max(0.f,staminaShowTime-dtF);
+  stunTime        = std::max(0.f,stunTime-dtF);
 
   // validate lock-on target (npc may be gone or dead)
   if(lock!=nullptr) {
@@ -632,7 +698,29 @@ void EldenPlayer::tick(Npc& pl, uint64_t dt) {
   if(!pl.isPlayer() && btn[Dodge].mReleased)
     in.mDodgeDirection = std::array<float,2>{aiDodgeX,aiDodgeY};
 
+  // Elden Ring critical: a light attack behind an enemy (or at one whose stance broke) is a backstab/riposte
+  Npc* critCandidate = nullptr;
+  if(pl.isPlayer() && btn[Light].mPressed && ctrl.action()==EAction::Idle && !ctrl.sprinting() &&
+     (pl.weaponState()==WeaponState::W1H || pl.weaponState()==WeaponState::W2H))
+    critCandidate = findCriticalTarget(pl);
+  if(critCandidate!=nullptr) {
+    in.mLight             = {};
+    in.mCritical.mPressed = true;
+    in.mCritical.mHeld    = true;
+    in.mCriticalAvailable = true;
+    }
+
   const auto up = ctrl.update(in,dtF);
+  if(ctrl.action()==EAction::Critical) {
+    if(ctrl.sequence()!=critSeq) {
+      critSeq    = ctrl.sequence();
+      critTarget = critCandidate;
+      critPlaced = false;
+      }
+    } else {
+    critTarget = nullptr;
+    }
+  updateCritical(pl);
   for(auto& b:btn) {
     b.mPressed  = false;
     b.mReleased = false;
@@ -762,6 +850,17 @@ void EldenPlayer::updatePose(Npc& pl, const EldenCombat::Update* up, float dt) {
     if(a==EAction::StanceBreak)
       clip = EldenCombat::Controller::actionDefinition(EAction::GuardBreak,ctrl.config()).mAnimation;
     frame = ctrl.frame()*def.mAnimationSpeed;
+    if(a==EAction::Critical) {
+      // no critical clips in the bank: the weapon's heavy swing, its contact on the critical's contact
+      auto hd = EldenCombat::Controller::actionDefinition(EAction::Heavy1,ctrl.config(),twoH);
+      if(hd.mAnimation.empty())
+        hd = EldenCombat::Controller::actionDefinition(EAction::Light1,ctrl.config(),twoH);
+      const float hc = def.mHitCount>0 ? std::max(def.mHits[0].mFrom,1.f) : 28.f;
+      const float hh = hd.mHitCount>0  ? std::max(hd.mHits[0].mFrom,1.f)  : hc;
+      const float f  = ctrl.frame();
+      clip  = hd.mAnimation;
+      frame = (f<=hc ? f*hh/hc : hh+(f-hc))*hd.mAnimationSpeed;
+      }
     if(a==EAction::Roll || a==EAction::CrouchRoll)
       yaw = up!=nullptr ? std::atan2(up->mMoveX,up->mMoveY) : 0.f;
     poseTime = 0.f;
@@ -843,6 +942,107 @@ void EldenPlayer::updatePose(Npc& pl, const EldenCombat::Update* up, float dt) {
   pl.eldenSetBoneOverride(rig.local(),rig.mask(),rig.weight());
   }
 
+Npc* EldenPlayer::findCriticalTarget(Npc& pl) const {
+  auto&       w   = pl.world();
+  const float a   = pl.rotationRad();
+  const Vec3  fwd = Vec3(std::cos(a),0,std::sin(a));
+  Npc*        best  = nullptr;
+  float       bestD = 0.f;
+  for(uint32_t i=0; i<w.npcCount(); ++i) {
+    auto npc = w.npcById(i);
+    if(npc==nullptr || npc==&pl || npc->isDown() || npc->isPlayer())
+      continue;
+    Vec3 dp = npc->position()-pl.position();
+    if(std::abs(dp.y)>120.f)
+      continue;
+    dp.y = 0;
+    const float d = dp.length();
+    if(d<1.f || d>170.f || (best!=nullptr && d>=bestD))
+      continue;
+    const Vec3 dir = dp/d;
+    if(Vec3::dotProduct(fwd,dir)<0.6f)
+      continue; // must be in front of the player
+    // allies fighting someone else at the player's side are not backstabbed
+    if(!npc->isMonster() && npc->target()!=nullptr && npc->target()!=&pl &&
+       npc->weaponState()!=WeaponState::NoWeapon && w.script().personAttitude(*npc,pl)!=ATT_HOSTILE)
+      continue;
+    const float nr     = npc->rotationRad();
+    const bool  behind = Vec3::dotProduct(Vec3(std::cos(nr),0,std::sin(nr)),dir)>0.5f; // faces away from us
+    auto        ve     = npc->eldenActorIfAny();
+    const bool  broken = ve!=nullptr && ve->controller().criticalReady();
+    if(!behind && !broken)
+      continue;
+    best  = npc;
+    bestD = d;
+    }
+  return best;
+  }
+
+void EldenPlayer::alarmWitnesses(Npc& pl, Npc& victim) {
+  // a one-blow takedown gives the victim no time to call for help: whoever sees it,
+  // and is on the victim's side, joins the fight like in Gothic when you attack someone
+  auto&      w      = pl.world();
+  auto&      scr    = w.script();
+  const bool murder = victim.isDead();
+  for(uint32_t i=0; i<w.npcCount(); ++i) {
+    auto npc = w.npcById(i);
+    if(npc==nullptr || npc==&pl || npc==&victim || npc->isDown() || npc->isMonster())
+      continue;
+    if((npc->position()-victim.position()).quadLength()>1500.f*1500.f)
+      continue;
+    if(npc->target()==&pl && npc->weaponState()!=WeaponState::NoWeapon)
+      continue; // already fighting the player
+    if(scr.personAttitude(*npc,victim)==ATT_HOSTILE)
+      continue; // glad to see it
+    if(!npc->canSeeNpc(victim,false) && !npc->canSeeNpc(pl,false))
+      continue;
+    scr.eldenAlarm(*npc,pl,murder);
+    if(debugOn())
+      Log::i("elden: ",std::string(npc->displayName())," saw the critical on ",std::string(victim.displayName()));
+    }
+  }
+
+void EldenPlayer::updateCritical(Npc& pl) {
+  if(critTarget==nullptr)
+    return;
+  auto& w     = pl.world();
+  bool  alive = false;
+  for(uint32_t i=0; i<w.npcCount() && !alive; ++i)
+    alive = w.npcById(i)==critTarget;
+  if(!alive) {
+    critTarget = nullptr;
+    return;
+    }
+  auto& v  = *critTarget;
+  auto  ve = v.eldenActor();
+  if(!critPlaced) {
+    critPlaced = true;
+    // pin both actors: the attacker steps behind (or in front of a broken stance), the victim freezes
+    const float nr = v.rotationRad();
+    const Vec3  nf = Vec3(std::cos(nr),0,std::sin(nr));
+    Vec3        dp = v.position()-pl.position();
+    dp.y = 0;
+    const bool  behind = Vec3::dotProduct(nf,dp)>0.f;
+    Vec3        move   = (v.position() + nf*(behind ? -90.f : 90.f)) - pl.position();
+    move.y = 0;
+    pl.tryMove(move);
+    if(ve!=nullptr) {
+      if(!behind)
+        ve->ctrl.consumeCritical();
+      ve->stunFor(1.6f);
+      ve->stopDrive(v,false);
+      }
+    if(!v.isDown())
+      v.eldenForceAnim(v.weaponState()==WeaponState::NoWeapon || ve==nullptr ? "S_RUN" : "S_"+ve->prefix(v),BS_STAND);
+    if(debugOn())
+      Log::i("elden: critical ",behind ? "backstab" : "riposte"," on ",std::string(v.displayName()));
+    }
+  Vec3 dp = v.position()-pl.position();
+  dp.y = 0;
+  if(dp.length()>1.f)
+    pl.setDirection(dp);
+  }
+
 void EldenPlayer::applyHits(Npc& pl) {
   auto& w = pl.world();
   while(auto h = ctrl.activeHit()) {
@@ -859,12 +1059,30 @@ void EldenPlayer::applyHits(Npc& pl) {
       mul *= 1.25f; // swing released at full charge
     if(h->mAction==EAction::GuardCounter)
       mul *= 1.3f;
+    const bool critical = h->mAction==EAction::Critical;
+    if(critical)
+      mul = 3.5f*gripDamageMultiplier(pl); // Elden Ring backstab/riposte
 
     bool any = false;
     for(uint32_t i=0; i<w.npcCount(); ++i) {
       auto npc = w.npcById(i);
       if(npc==nullptr || npc==&pl || npc->isDown())
         continue;
+      if(critical) {
+        if(npc!=critTarget || std::find(hitDone.begin(),hitDone.end(),npc)!=hitDone.end() ||
+           (npc->position()-pl.position()).length()>300.f)
+          continue;
+        if(auto ve = npc->eldenActor())
+          ve->markCriticalHit();
+        pl.eldenHit(*npc,mul);
+        hitDone.push_back(npc);
+        if(debugOn())
+          Log::i("elden: critical on ",std::string(npc->displayName())," x",mul," hp=",npc->attribute(ATR_HITPOINTS));
+        if(pl.isPlayer())
+          alarmWitnesses(pl,*npc);
+        any = true;
+        continue;
+        }
       // only the focused/locked target and npcs fighting the player: don't cleave through bystanders
       // the focused/locked target, anyone fighting this actor, and (for the player) hostile creatures
       bool relevant = (npc==lock || npc==pl.target() || npc->target()==&pl);
@@ -984,6 +1202,7 @@ EldenPlayer::Native EldenPlayer::pickNative(Npc& pl, EAction a, const EldenComba
     case EAction::PairedLight4: case EAction::PairedLight5: case EAction::PairedLight6:
       return light(size_t(a)-size_t(EAction::PairedLight1));
 
+    case EAction::Critical:
     case EAction::Heavy1Charge:
     case EAction::Heavy1: {
       // the last stage of Gothic's combo is the widest, strongest swing
@@ -1158,9 +1377,11 @@ bool EldenPlayer::dodgesSpell(const Npc& pl) const {
   }
 
 bool EldenPlayer::onPlayerHit(Npc& pl, Npc& attacker, const Bullet* b) {
+  const bool critical = incomingCritical && b==nullptr;
+  incomingCritical = false;
   if(!ownsMelee(pl))
     return true;
-  if(ctrl.postHitProtectionRemaining()>0.f)
+  if(!critical && ctrl.postHitProtectionRemaining()>0.f)
     return false;
 
   // rough Gothic hit strength, to size stamina/stance damage
@@ -1183,7 +1404,11 @@ bool EldenPlayer::onPlayerHit(Npc& pl, Npc& attacker, const Bullet* b) {
     const float a   = pl.rotationRad();
     in.mFacingDot = len>0.f ? (dp.x*std::cos(a)+dp.z*std::sin(a))/len : 1.f;
   }
-  (void)b;
+  if(critical) {
+    in.mCritical = true;
+    in.mLevel    = EldenCombat::HurtLevel::Knockdown;
+    stunTime     = 0.f;
+    }
 
   const auto res = ctrl.receiveHit(in);
   if(debugOn())

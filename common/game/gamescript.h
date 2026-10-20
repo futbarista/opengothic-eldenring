@@ -133,6 +133,8 @@ class GameScript final {
 
     void invokeState(const std::shared_ptr<zenkit::INpc>& hnpc, const std::shared_ptr<zenkit::INpc>& hother, const char* name);
     int  invokeState(Npc* npc, Npc* other, Npc *victim, ScriptFn fn);
+    // B_Attack(witness, attacker): witness of an elden critical joins the fight
+    void eldenAlarm(Npc& witness, Npc& attacker, bool murder);
     void invokeItem (Npc* npc, ScriptFn fn);
     int  invokeMana (Npc& npc, Npc* target, int mana);
     int  invokeManaRelease (Npc& npc, Npc* target, int mana);

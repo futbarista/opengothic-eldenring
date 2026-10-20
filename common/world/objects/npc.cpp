@@ -1727,6 +1727,8 @@ bool Npc::implAttack(uint64_t dt) {
         }
       if(erActor!=nullptr) {
         // Elden controller: light/heavy chains with imported timings
+        if(erActor->isStunned())
+          return true; // held by the player's critical
         if(erActor->aiAttack(*this)) {
           implFaiWait(erActor->aiWaitMs());
           fghAlgo.consumeAction();

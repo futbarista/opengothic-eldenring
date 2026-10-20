@@ -112,6 +112,11 @@ CommandLine::CommandLine(int argc, const char** argv) {
           }
         }
       }
+    else if(arg=="-eldenteleport") {
+      ++i;
+      if(i<argc)
+        eldenTeleportWp = argv[i];
+      }
     else if(arg=="-eldenanims") {
       ++i;
       if(i<argc)

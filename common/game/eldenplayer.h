@@ -85,9 +85,17 @@ class EldenPlayer final {
     uint64_t aiWaitMs() const;
     const EldenCombat::Controller& controller() const { return ctrl; }
 
+    // victim side of an Elden Ring critical (backstab/riposte)
+    void     stunFor(float seconds) { stunTime = std::max(stunTime,seconds); }
+    bool     isStunned() const { return stunTime>0.f; }
+    void     markCriticalHit() { incomingCritical = true; }
+
   private:
     void     aiTick(Npc& npc, float dt);
     void     tryFinisher(Npc& pl, float dt);
+    Npc*     findCriticalTarget(Npc& pl) const;
+    void     updateCritical(Npc& pl);
+    void     alarmWitnesses(Npc& pl, Npc& victim);
 
     struct Native {
       const Animation::Sequence* sq        = nullptr;
@@ -169,4 +177,10 @@ class EldenPlayer final {
     bool                    sprinting = false;
     bool                    lockedMove = false;
     bool                    driving    = false;
+
+    Npc*                    critTarget = nullptr; // victim of the running critical
+    std::uint64_t           critSeq    = 0;
+    bool                    critPlaced = false;
+    bool                    incomingCritical = false;
+    float                   stunTime   = 0.f;
   };
